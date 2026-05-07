@@ -587,12 +587,28 @@ std::filesystem::path DebugExceptionHandler::WriteCrashReport(EXCEPTION_POINTERS
         RtlCaptureContext(&context);
     }
 
-    auto baseName = std::format(
-        "LatiteCrash-{}-pid{}-tid{}",
+#if defined(LATITE_NIGHTLY)
+    std::string baseName = std::format(
+        "LatiteNightlyCrash-{}",
         MakeTimestamp(true),
         GetCurrentProcessId(),
         GetCurrentThreadId()
     );
+#elif defined(LATITE_DEBUG)
+    std::string baseName = std::format(
+        "LatiteDebugCrash-{}",
+        MakeTimestamp(true),
+        GetCurrentProcessId(),
+        GetCurrentThreadId()
+    );
+#else
+    std::string baseName = std::format(
+        "LatiteCrash-{}",
+        MakeTimestamp(true),
+        GetCurrentProcessId(),
+        GetCurrentThreadId()
+    );
+#endif
 
     std::ostringstream report;
     report << "\n";

@@ -106,7 +106,13 @@ DWORD __stdcall startThread(HINSTANCE dll) {
     DebugExceptionHandler::Install();
 #endif
 
+#if defined(LATITE_NIGHTLY)
+    Logger::Info("Latite Client [NIGHTLY] {}", Latite::version);
+#elif defined(LATITE_DEBUG)
+    Logger::Info("Latite Client [DEBUG] {}", Latite::version);
+#else
     Logger::Info("Latite Client {}", Latite::version);
+#endif
 
     char path[MAX_PATH]{};
     GetModuleFileNameA(nullptr, path, MAX_PATH);
