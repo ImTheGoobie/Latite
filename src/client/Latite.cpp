@@ -505,8 +505,6 @@ void Latite::threadsafeInit() {
 
     Latite::getCommandManager().prefix = Latite::get().getCommandPrefix();
     Latite::getNotifications().push(LocalizeString::get("client.intro.welcome"));
-    //intentional crashing code
-    *reinterpret_cast<volatile int*>(0) = 1;
     Latite::getNotifications().push(util::FormatWString(LocalizeString::get("client.intro.menubutton"), { util::StrToWStr(util::KeyToString(Latite::get().getMenuKey().value)) }));
 }
 

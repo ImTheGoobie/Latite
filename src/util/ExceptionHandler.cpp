@@ -323,8 +323,9 @@ namespace {
         }
 
         auto dumpPath = CrashPath() / (baseName + ".dmp");
+        auto tempDumpPath = CrashPath() / (baseName + ".dmp.tmp");
         HANDLE dumpFile = CreateFileW(
-            dumpPath.wstring().c_str(),
+            tempDumpPath.wstring().c_str(),
             GENERIC_WRITE,
             0,
             nullptr,
@@ -337,7 +338,7 @@ namespace {
             AppendRawLog(std::format(
                 "[{}] [FATAL] Failed to create minidump {}. Error: {}\n",
                 MakeTimestamp(false),
-                dumpPath.string(),
+                tempDumpPath.string(),
                 LastErrorToString(GetLastError())
             ));
             return {};
@@ -348,13 +349,14 @@ namespace {
         dumpException.ExceptionPointers = exceptionInfo;
         dumpException.ClientPointers = FALSE;
 
+        // Keep the primary dump conservative. More aggressive flags such as
+        // MiniDumpWithIndirectlyReferencedMemory can fault again when the crash
+        // was caused by corrupt SDK pointers or invalid offsets.
         auto dumpType = static_cast<MINIDUMP_TYPE>(
             MiniDumpNormal |
             MiniDumpWithDataSegs |
-            MiniDumpWithHandleData |
             MiniDumpWithThreadInfo |
             MiniDumpWithUnloadedModules |
-            MiniDumpWithIndirectlyReferencedMemory |
             MiniDumpWithFullMemoryInfo
         );
 
@@ -376,9 +378,21 @@ namespace {
             AppendRawLog(std::format(
                 "[{}] [FATAL] MiniDumpWriteDump failed for {}. Error: {}\n",
                 MakeTimestamp(false),
-                dumpPath.string(),
+                tempDumpPath.string(),
                 LastErrorToString(error)
             ));
+            DeleteFileW(tempDumpPath.wstring().c_str());
+            return {};
+        }
+
+        if (!MoveFileExW(tempDumpPath.wstring().c_str(), dumpPath.wstring().c_str(), MOVEFILE_REPLACE_EXISTING)) {
+            AppendRawLog(std::format(
+                "[{}] [FATAL] Failed to finalize minidump {}. Error: {}\n",
+                MakeTimestamp(false),
+                dumpPath.string(),
+                LastErrorToString(GetLastError())
+            ));
+            DeleteFileW(tempDumpPath.wstring().c_str());
             return {};
         }
 
@@ -552,10 +566,16 @@ std::string DebugExceptionHandler::GenerateStackTrace(CONTEXT* contextArg) {
 
 std::filesystem::path DebugExceptionHandler::WriteCrashReport(EXCEPTION_POINTERS* exceptionInfo, std::string_view reason) {
     if (crashHandlerEntered.exchange(1) != 0) {
-        AppendRawLog(std::format(
-            "[{}] [FATAL] Crash handler re-entered while handling another crash.\n",
-            MakeTimestamp(false)
-        ));
+        std::ostringstream reentryReport;
+        reentryReport << "[" << MakeTimestamp(false) << "] [FATAL] Crash handler re-entered while handling another crash.";
+        if (exceptionInfo && exceptionInfo->ExceptionRecord) {
+            reentryReport << " Re-entry code: 0x" << std::hex << std::uppercase
+                << exceptionInfo->ExceptionRecord->ExceptionCode;
+            reentryReport << " at " << FormatAddress(reinterpret_cast<DWORD64>(
+                exceptionInfo->ExceptionRecord->ExceptionAddress));
+        }
+        reentryReport << "\n";
+        AppendRawLog(reentryReport.str());
         return {};
     }
 
@@ -573,8 +593,6 @@ std::filesystem::path DebugExceptionHandler::WriteCrashReport(EXCEPTION_POINTERS
         GetCurrentProcessId(),
         GetCurrentThreadId()
     );
-
-    auto dumpPath = WriteMiniDump(exceptionInfo, baseName);
 
     std::ostringstream report;
     report << "\n";
@@ -595,17 +613,26 @@ std::filesystem::path DebugExceptionHandler::WriteCrashReport(EXCEPTION_POINTERS
         report << "Latite Module: " << latiteModulePath.string() << "\n";
     }
 
+    report << "Minidump: attempting " << (CrashPath() / (baseName + ".dmp")).string() << "\n";
+    report << "==============================================\n";
+    AppendRawLog(report.str());
+
+    auto dumpPath = WriteMiniDump(exceptionInfo, baseName);
+
+    std::ostringstream dumpResult;
     if (!dumpPath.empty()) {
-        report << "Minidump: " << dumpPath.string() << "\n";
+        dumpResult << "[" << MakeTimestamp(false) << "] [FATAL] Minidump written: " << dumpPath.string() << "\n";
     }
     else {
-        report << "Minidump: unavailable\n";
+        dumpResult << "[" << MakeTimestamp(false) << "] [FATAL] Minidump unavailable.\n";
     }
+    AppendRawLog(dumpResult.str());
 
-    report << GenerateStackTrace(&context);
-    report << "==============================================\n";
+    std::ostringstream stackReport;
+    stackReport << GenerateStackTrace(&context);
+    stackReport << "==============================================\n";
+    AppendRawLog(stackReport.str());
 
-    AppendRawLog(report.str());
     return dumpPath;
 }
 
