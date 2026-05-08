@@ -1,6 +1,7 @@
 ﻿#include "pch.h"
 // LatiteRecode.cpp : Defines the entry point for the application.
 //
+#include <cstdint>
 #include <regex>
 
 #include "Latite.h"
@@ -80,6 +81,12 @@ namespace {
     alignas(Notifications) char notificaitonsBuf[sizeof(Notifications)] = {};
 
     bool hasInjected = false;
+
+    struct DllMainCall {
+        HINSTANCE hinstDLL;
+        DWORD fdwReason;
+        LPVOID reserved;
+    };
 }
 
 #define MVSIG(...) ([]() -> std::pair<SigImpl*, SigImpl*> {\
@@ -90,7 +97,7 @@ namespace {
 /*return {&Signatures_1_18_12::__VA_ARGS__, &Signatures::__VA_ARGS__}; }*/\
 )()
 
-DWORD __stdcall startThread(HINSTANCE dll) {
+DWORD __stdcall startThreadImpl(HINSTANCE dll) {
     BEGIN_ERROR_HANDLER
     // Needed for Logger
     new (messageSinkBuf) ClientMessageQueue;
@@ -309,7 +316,21 @@ DWORD __stdcall startThread(HINSTANCE dll) {
     END_ERROR_HANDLER
 }
 
-BOOL WINAPI DllMain(
+DWORD __stdcall startThread(LPVOID context) {
+#ifdef LATITE_CRASH_REPORTING
+    return static_cast<DWORD>(DebugExceptionHandler::RunWithSehGuard(
+        [](void* param) -> std::uintptr_t {
+            return startThreadImpl(static_cast<HINSTANCE>(param));
+        },
+        context,
+        "Caught SEH exception in Latite startup thread"
+    ));
+#else
+    return startThreadImpl(static_cast<HINSTANCE>(context));
+#endif
+}
+
+BOOL WINAPI DllMainImpl(
     HINSTANCE hinstDLL,  // handle to DLL module
     DWORD fdwReason,     // reason for calling function
     LPVOID)  // reserved
@@ -321,7 +342,7 @@ BOOL WINAPI DllMain(
         hasInjected = true;
 
         DisableThreadLibraryCalls(hinstDLL);
-        CloseHandle(CreateThread(nullptr, 0, (LPTHREAD_START_ROUTINE)startThread, hinstDLL, 0, nullptr));
+        CloseHandle(CreateThread(nullptr, 0, startThread, hinstDLL, 0, nullptr));
     }
     else if (fdwReason == DLL_PROCESS_DETACH) {
         // Remove singletons
@@ -358,6 +379,26 @@ BOOL WINAPI DllMain(
     }
     return TRUE;  // Successful DLL_PROCESS_ATTACH.
     END_ERROR_HANDLER
+}
+
+BOOL WINAPI DllMain(
+    HINSTANCE hinstDLL,  // handle to DLL module
+    DWORD fdwReason,     // reason for calling function
+    LPVOID reserved)  // reserved
+{
+#ifdef LATITE_CRASH_REPORTING
+    DllMainCall call{hinstDLL, fdwReason, reserved};
+    return static_cast<BOOL>(DebugExceptionHandler::RunWithSehGuard(
+        [](void* context) -> std::uintptr_t {
+            auto* call = static_cast<DllMainCall*>(context);
+            return DllMainImpl(call->hinstDLL, call->fdwReason, call->reserved);
+        },
+        &call,
+        "Caught SEH exception in Latite DllMain"
+    ));
+#else
+    return DllMainImpl(hinstDLL, fdwReason, reserved);
+#endif
 }
 
 Latite& Latite::get() noexcept {
@@ -481,12 +522,6 @@ void Latite::threadsafeInit() {
     this->gameThreadId = std::this_thread::get_id();
     // TODO: latite beta only
     //if (SDK::ClientInstance::get()->minecraftGame->xuid.size() > 0) wnd->postXUID();
-
-
-#ifdef LATITE_CRASH_REPORTING
-    // Set SEH translator for game thread
-    DebugExceptionHandler::InstallForCurrentThread();
-#endif
 
 
     //auto app = winrt::Windows::UI::ViewManagement::ApplicationView::GetForCurrentView();

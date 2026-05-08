@@ -2,7 +2,6 @@
 
 #ifdef LATITE_CRASH_REPORTING
 #include "util/ExceptionHandler.h"
-#include <stdexcept>
 
 #define LATITE_ERROR_HANDLER_CONCAT_INNER(a, b) a##b
 #define LATITE_ERROR_HANDLER_CONCAT(a, b) LATITE_ERROR_HANDLER_CONCAT_INNER(a, b)
@@ -10,9 +9,6 @@
 #define BEGIN_ERROR_HANDLER DebugExceptionHandler::ErrorBoundaryScope LATITE_ERROR_HANDLER_CONCAT(latiteErrorBoundaryScope, __LINE__); try {
 
 #define END_ERROR_HANDLER \
-    } catch (StructuredException& ex) { \
-        LogExceptionDetails(ex); \
-        DebugExceptionHandler::AbortProcess(); \
     } catch (const std::exception& e) { \
         LogExceptionDetails(e); \
         DebugExceptionHandler::AbortProcess(); \

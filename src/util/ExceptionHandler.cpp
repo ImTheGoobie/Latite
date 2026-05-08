@@ -7,7 +7,6 @@
 #include <atomic>
 #include <cstdlib>
 #include <dbghelp.h>
-#include <eh.h>
 #include <iomanip>
 #include <iterator>
 #include <psapi.h>
@@ -544,10 +543,24 @@ namespace {
 
         DebugExceptionHandler::AbortProcess();
     }
-}
 
-void __cdecl translate_seh_to_cpp_exception(unsigned int, EXCEPTION_POINTERS* pExp) {
-    throw StructuredException(pExp);
+    int HandleSehException(EXCEPTION_POINTERS* exceptionInfo, char const* reason) noexcept {
+        if (exceptionInfo && exceptionInfo->ExceptionRecord &&
+            exceptionInfo->ExceptionRecord->ExceptionCode == cppExceptionCode) {
+            return EXCEPTION_CONTINUE_SEARCH;
+        }
+
+        try {
+            DebugExceptionHandler::WriteCrashReport(
+                exceptionInfo,
+                reason ? reason : "Caught SEH exception at Latite native boundary"
+            );
+        }
+        catch (...) {
+        }
+
+        return EXCEPTION_EXECUTE_HANDLER;
+    }
 }
 
 __declspec(thread) CONTEXT g_CxxExceptionContext = {};
@@ -565,12 +578,7 @@ LONG WINAPI VectoredExceptionHandler(PEXCEPTION_POINTERS pExceptionInfo) {
     return EXCEPTION_CONTINUE_SEARCH;
 }
 
-void DebugExceptionHandler::InstallForCurrentThread() {
-    _set_se_translator(translate_seh_to_cpp_exception);
-}
-
 void DebugExceptionHandler::PrepareErrorBoundary() {
-    InstallForCurrentThread();
     g_CxxExceptionContext = {};
     g_bHasCxxExceptionContext = false;
 }
@@ -592,8 +600,6 @@ DebugExceptionHandler::ErrorBoundaryScope::~ErrorBoundaryScope() {
 }
 
 void DebugExceptionHandler::Install() {
-    InstallForCurrentThread();
-
     try {
         std::filesystem::create_directories(CrashPath());
     }
@@ -656,6 +662,30 @@ bool DebugExceptionHandler::IsHandlingCrash() {
     TerminateProcess(GetCurrentProcess(), 1);
     for (;;) {
         Sleep(INFINITE);
+    }
+}
+
+std::uintptr_t DebugExceptionHandler::RunWithSehGuard(SehCallback callback, void* context, char const* reason) noexcept {
+    __try {
+        if (callback) {
+            return callback(context);
+        }
+    }
+    __except (HandleSehException(GetExceptionInformation(), reason)) {
+        AbortProcess();
+    }
+
+    return 0;
+}
+
+void DebugExceptionHandler::RunVoidWithSehGuard(SehVoidCallback callback, void* context, char const* reason) noexcept {
+    __try {
+        if (callback) {
+            callback(context);
+        }
+    }
+    __except (HandleSehException(GetExceptionInformation(), reason)) {
+        AbortProcess();
     }
 }
 
@@ -807,10 +837,6 @@ std::filesystem::path DebugExceptionHandler::WriteCrashReport(EXCEPTION_POINTERS
     AppendRawLog(stackReport.str());
 
     return dumpPath;
-}
-
-void LogExceptionDetails(StructuredException& ex) {
-    DebugExceptionHandler::WriteCrashReport(ex.getExceptionPointers(), "Caught SEH exception at Latite error boundary");
 }
 
 void LogUnknownExceptionDetails(std::string_view reason) {

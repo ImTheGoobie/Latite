@@ -105,7 +105,7 @@ target_compile_definitions(Latite PRIVATE
 
 # Compile options
 target_compile_options(Latite PRIVATE
-        /EHa
+        /EHsc
         /GR-
         /W4
 )
