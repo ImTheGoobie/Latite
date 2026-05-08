@@ -11,6 +11,7 @@
 #include <psapi.h>
 
 namespace {
+    // MSVC's SEH exception code for a C++ exception
     constexpr DWORD cppExceptionCode = 0xE06D7363;
 
     PVOID vectoredHandler = nullptr;
