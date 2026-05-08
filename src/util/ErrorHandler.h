@@ -4,18 +4,21 @@
 #include "util/ExceptionHandler.h"
 #include <stdexcept>
 
-#define BEGIN_ERROR_HANDLER try {
+#define LATITE_ERROR_HANDLER_CONCAT_INNER(a, b) a##b
+#define LATITE_ERROR_HANDLER_CONCAT(a, b) LATITE_ERROR_HANDLER_CONCAT_INNER(a, b)
+
+#define BEGIN_ERROR_HANDLER DebugExceptionHandler::ErrorBoundaryScope LATITE_ERROR_HANDLER_CONCAT(latiteErrorBoundaryScope, __LINE__); try {
 
 #define END_ERROR_HANDLER \
     } catch (StructuredException& ex) { \
         LogExceptionDetails(ex); \
-        ExitProcess(1); \
+        DebugExceptionHandler::AbortProcess(); \
     } catch (const std::exception& e) { \
         LogExceptionDetails(e); \
-        ExitProcess(1); \
+        DebugExceptionHandler::AbortProcess(); \
     } catch (...) { \
-        LogExceptionDetails(std::runtime_error("An unknown exception occurred.")); \
-        ExitProcess(1); \
+        LogUnknownExceptionDetails("Caught unknown exception at Latite error boundary"); \
+        DebugExceptionHandler::AbortProcess(); \
     }
 
 #else

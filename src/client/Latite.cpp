@@ -485,7 +485,7 @@ void Latite::threadsafeInit() {
 
 #ifdef LATITE_CRASH_REPORTING
     // Set SEH translator for game thread
-    _set_se_translator(translate_seh_to_cpp_exception);
+    DebugExceptionHandler::InstallForCurrentThread();
 #endif
 
 

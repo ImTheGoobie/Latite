@@ -40,14 +40,26 @@ extern __declspec(thread) bool g_bHasCxxExceptionContext;
 LONG WINAPI VectoredExceptionHandler(PEXCEPTION_POINTERS pExceptionInfo);
 
 namespace DebugExceptionHandler {
+    class ErrorBoundaryScope {
+    public:
+        ErrorBoundaryScope();
+        ErrorBoundaryScope(ErrorBoundaryScope const&) = delete;
+        ErrorBoundaryScope& operator=(ErrorBoundaryScope const&) = delete;
+        ~ErrorBoundaryScope();
+    };
+
     void Install();
     void Uninstall();
+    void InstallForCurrentThread();
+    void PrepareErrorBoundary();
     bool IsHandlingCrash();
+    [[noreturn]] void AbortProcess();
     std::string GenerateStackTrace(CONTEXT* contextArg = nullptr);
     std::filesystem::path WriteCrashReport(EXCEPTION_POINTERS* exceptionInfo, std::string_view reason);
 }
 
 void LogExceptionDetails(StructuredException& ex);
 void LogExceptionDetails(const std::exception& e);
+void LogUnknownExceptionDetails(std::string_view reason);
 
 #endif

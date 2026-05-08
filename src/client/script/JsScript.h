@@ -2,6 +2,9 @@
 #include <memory>
 #include <functional>
 #include <util/ChakraUtil.h>
+#ifdef LATITE_CRASH_REPORTING
+#include "util/ExceptionHandler.h"
+#endif
 
 class JsScript {
 public:
@@ -69,7 +72,28 @@ public:
 		}
 
 		void run() {
+#ifdef LATITE_CRASH_REPORTING
+			thr = std::make_shared<std::thread>([this] {
+				DebugExceptionHandler::ErrorBoundaryScope errorBoundaryScope;
+				try {
+					initFunc(this);
+				}
+				catch (StructuredException& ex) {
+					LogExceptionDetails(ex);
+					DebugExceptionHandler::AbortProcess();
+				}
+				catch (std::exception const& e) {
+					LogExceptionDetails(e);
+					DebugExceptionHandler::AbortProcess();
+				}
+				catch (...) {
+					LogUnknownExceptionDetails("Caught unknown exception in a Latite async operation");
+					DebugExceptionHandler::AbortProcess();
+				}
+			});
+#else
 			thr = std::make_shared<std::thread>(std::thread(initFunc, this));
+#endif
 			thr->detach();
 		}
 

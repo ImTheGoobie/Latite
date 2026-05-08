@@ -5,9 +5,11 @@
 #include "util/Util.h"
 
 #include <atomic>
+#include <cstdlib>
 #include <dbghelp.h>
 #include <eh.h>
 #include <iomanip>
+#include <iterator>
 #include <psapi.h>
 
 namespace {
@@ -17,16 +19,33 @@ namespace {
     PVOID vectoredHandler = nullptr;
     LPTOP_LEVEL_EXCEPTION_FILTER previousUnhandledExceptionFilter = nullptr;
     std::terminate_handler previousTerminateHandler = nullptr;
+    bool handlersInstalled = false;
 
+    INIT_ONCE handlerLockInit = INIT_ONCE_STATIC_INIT;
+    CRITICAL_SECTION handlerLock = {};
     INIT_ONCE symbolLockInit = INIT_ONCE_STATIC_INIT;
     CRITICAL_SECTION symbolLock = {};
     bool symbolsInitialized = false;
     bool ownsSymbolHandler = false;
     std::atomic_long crashHandlerEntered = 0;
 
+    BOOL CALLBACK InitHandlerLock(PINIT_ONCE, PVOID, PVOID*) {
+        InitializeCriticalSection(&handlerLock);
+        return TRUE;
+    }
+
     BOOL CALLBACK InitSymbolLock(PINIT_ONCE, PVOID, PVOID*) {
         InitializeCriticalSection(&symbolLock);
         return TRUE;
+    }
+
+    void EnterHandlerLock() {
+        InitOnceExecuteOnce(&handlerLockInit, InitHandlerLock, nullptr, nullptr);
+        EnterCriticalSection(&handlerLock);
+    }
+
+    void LeaveHandlerLock() {
+        LeaveCriticalSection(&handlerLock);
     }
 
     void EnterSymbolLock() {
@@ -38,8 +57,71 @@ namespace {
         LeaveCriticalSection(&symbolLock);
     }
 
+    class CriticalSectionGuard {
+    public:
+        explicit CriticalSectionGuard(void (*enterFunc)(), void (*leaveFunc)())
+            : m_leaveFunc(leaveFunc) {
+            enterFunc();
+        }
+
+        CriticalSectionGuard(CriticalSectionGuard const&) = delete;
+        CriticalSectionGuard& operator=(CriticalSectionGuard const&) = delete;
+
+        ~CriticalSectionGuard() {
+            m_leaveFunc();
+        }
+
+    private:
+        void (*m_leaveFunc)();
+    };
+
     std::string LastErrorToString(DWORD error) {
         return std::format("{}", error);
+    }
+
+    std::string WideToUtf8(std::wstring const& value) {
+        if (value.empty()) {
+            return {};
+        }
+
+        int size = WideCharToMultiByte(
+            CP_UTF8,
+            0,
+            value.c_str(),
+            static_cast<int>(value.size()),
+            nullptr,
+            0,
+            nullptr,
+            nullptr
+        );
+        if (size <= 0) {
+            return {};
+        }
+
+        std::string result(static_cast<size_t>(size), '\0');
+        WideCharToMultiByte(
+            CP_UTF8,
+            0,
+            value.c_str(),
+            static_cast<int>(value.size()),
+            result.data(),
+            size,
+            nullptr,
+            nullptr
+        );
+        return result;
+    }
+
+    std::string WideToUtf8(wchar_t const* value) {
+        if (!value || !*value) {
+            return {};
+        }
+
+        return WideToUtf8(std::wstring(value));
+    }
+
+    std::string PathToUtf8(std::filesystem::path const& path) {
+        return WideToUtf8(path.wstring());
     }
 
     std::string MakeTimestamp(bool fileSafe) {
@@ -100,9 +182,9 @@ namespace {
 
     HMODULE GetLatiteModule() {
         HMODULE module = nullptr;
-        GetModuleHandleExA(
+        GetModuleHandleExW(
             GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-            reinterpret_cast<LPCSTR>(&GetLatiteModule),
+            reinterpret_cast<LPCWSTR>(&GetLatiteModule),
             &module
         );
 
@@ -110,61 +192,61 @@ namespace {
     }
 
     std::filesystem::path GetModuleFilePath(HMODULE module) {
-        char path[MAX_PATH] = {};
-        if (!module || !GetModuleFileNameA(module, path, sizeof(path))) {
+        wchar_t path[MAX_PATH] = {};
+        if (!module || !GetModuleFileNameW(module, path, static_cast<DWORD>(std::size(path)))) {
             return {};
         }
 
         return path;
     }
 
-    void AddSymbolPathPart(std::string& symbolPath, std::filesystem::path const& path) {
+    void AddSymbolPathPart(std::wstring& symbolPath, std::filesystem::path const& path) {
         if (path.empty()) {
             return;
         }
 
-        auto part = path.string();
+        auto part = path.wstring();
         if (part.empty()) {
             return;
         }
 
         if (!symbolPath.empty()) {
-            symbolPath += ';';
+            symbolPath += L';';
         }
         symbolPath += part;
     }
 
-    void AddSymbolPathPart(std::string& symbolPath, char const* path) {
+    void AddSymbolPathPart(std::wstring& symbolPath, wchar_t const* path) {
         if (!path || !*path) {
             return;
         }
 
         if (!symbolPath.empty()) {
-            symbolPath += ';';
+            symbolPath += L';';
         }
         symbolPath += path;
     }
 
-    std::string BuildSymbolPath() {
-        std::string symbolPath;
+    std::wstring BuildSymbolPath() {
+        std::wstring symbolPath;
 
         auto latiteModulePath = GetModuleFilePath(GetLatiteModule());
         AddSymbolPathPart(symbolPath, latiteModulePath.parent_path());
         AddSymbolPathPart(symbolPath, util::GetLatitePath());
         AddSymbolPathPart(symbolPath, CrashPath());
 
-        char currentDirectory[MAX_PATH] = {};
-        if (GetCurrentDirectoryA(sizeof(currentDirectory), currentDirectory)) {
+        wchar_t currentDirectory[MAX_PATH] = {};
+        if (GetCurrentDirectoryW(static_cast<DWORD>(std::size(currentDirectory)), currentDirectory)) {
             AddSymbolPathPart(symbolPath, currentDirectory);
         }
 
-        char ntSymbolPath[32767] = {};
-        if (GetEnvironmentVariableA("_NT_SYMBOL_PATH", ntSymbolPath, sizeof(ntSymbolPath))) {
+        wchar_t ntSymbolPath[32767] = {};
+        if (GetEnvironmentVariableW(L"_NT_SYMBOL_PATH", ntSymbolPath, static_cast<DWORD>(std::size(ntSymbolPath)))) {
             AddSymbolPathPart(symbolPath, ntSymbolPath);
         }
 
-        char ntAltSymbolPath[32767] = {};
-        if (GetEnvironmentVariableA("_NT_ALT_SYMBOL_PATH", ntAltSymbolPath, sizeof(ntAltSymbolPath))) {
+        wchar_t ntAltSymbolPath[32767] = {};
+        if (GetEnvironmentVariableW(L"_NT_ALT_SYMBOL_PATH", ntAltSymbolPath, static_cast<DWORD>(std::size(ntAltSymbolPath)))) {
             AddSymbolPathPart(symbolPath, ntAltSymbolPath);
         }
 
@@ -186,10 +268,10 @@ namespace {
             return;
         }
 
-        SymLoadModuleEx(
+        SymLoadModuleExW(
             process,
             nullptr,
-            modulePath.string().c_str(),
+            modulePath.wstring().c_str(),
             nullptr,
             baseAddress,
             moduleInfo.SizeOfImage,
@@ -208,7 +290,7 @@ namespace {
 
         SymSetOptions(SYMOPT_UNDNAME | SYMOPT_LOAD_LINES | SYMOPT_FAIL_CRITICAL_ERRORS | SYMOPT_DEFERRED_LOADS);
 
-        if (SymInitialize(process, symbolPath.empty() ? nullptr : symbolPath.c_str(), TRUE)) {
+        if (SymInitializeW(process, symbolPath.empty() ? nullptr : symbolPath.c_str(), TRUE)) {
             symbolsInitialized = true;
             ownsSymbolHandler = true;
             EnsureLatiteModuleLoaded(process);
@@ -219,7 +301,7 @@ namespace {
         if (error == ERROR_INVALID_PARAMETER) {
             // DbgHelp is process-global. If something else initialized it first,
             // keep using that session and update the search path for LatiteDebug.pdb.
-            SymSetSearchPath(process, symbolPath.c_str());
+            SymSetSearchPathW(process, symbolPath.c_str());
             symbolsInitialized = true;
             ownsSymbolHandler = false;
             EnsureLatiteModuleLoaded(process);
@@ -241,16 +323,16 @@ namespace {
     }
 
     std::string FormatModuleOffset(HANDLE process, DWORD64 address) {
-        IMAGEHLP_MODULE64 moduleInfo = {};
+        IMAGEHLP_MODULEW64 moduleInfo = {};
         moduleInfo.SizeOfStruct = sizeof(moduleInfo);
 
-        if (SymGetModuleInfo64(process, address, &moduleInfo)) {
+        if (SymGetModuleInfoW64(process, address, &moduleInfo)) {
             std::string moduleName;
-            if (moduleInfo.ImageName && *moduleInfo.ImageName) {
-                moduleName = std::filesystem::path(moduleInfo.ImageName).filename().string();
+            if (*moduleInfo.ImageName) {
+                moduleName = PathToUtf8(std::filesystem::path(moduleInfo.ImageName).filename());
             }
             else {
-                moduleName = moduleInfo.ModuleName;
+                moduleName = WideToUtf8(moduleInfo.ModuleName);
             }
 
             auto offset = address - moduleInfo.BaseOfImage;
@@ -263,17 +345,17 @@ namespace {
     }
 
     std::string FormatStackFrame(HANDLE process, DWORD64 address) {
-        char symbolBuffer[sizeof(SYMBOL_INFO) + MAX_SYM_NAME] = {};
-        auto symbol = reinterpret_cast<PSYMBOL_INFO>(symbolBuffer);
-        symbol->SizeOfStruct = sizeof(SYMBOL_INFO);
+        alignas(SYMBOL_INFOW) char symbolBuffer[sizeof(SYMBOL_INFOW) + (MAX_SYM_NAME * sizeof(wchar_t))] = {};
+        auto symbol = reinterpret_cast<PSYMBOL_INFOW>(symbolBuffer);
+        symbol->SizeOfStruct = sizeof(SYMBOL_INFOW);
         symbol->MaxNameLen = MAX_SYM_NAME;
 
         std::ostringstream frame;
         DWORD64 displacement = 0;
 
-        if (SymFromAddr(process, address, &displacement, symbol)) {
+        if (SymFromAddrW(process, address, &displacement, symbol)) {
             frame << FormatModuleOffset(process, address) << " ";
-            frame << symbol->Name;
+            frame << WideToUtf8(std::wstring(symbol->Name, symbol->NameLen));
 
             if (displacement != 0) {
                 frame << "+0x" << std::hex << std::uppercase << displacement << std::dec;
@@ -283,11 +365,11 @@ namespace {
             frame << FormatModuleOffset(process, address);
         }
 
-        IMAGEHLP_LINE64 line = {};
+        IMAGEHLP_LINEW64 line = {};
         line.SizeOfStruct = sizeof(line);
         DWORD lineDisplacement = 0;
-        if (SymGetLineFromAddr64(process, address, &lineDisplacement, &line)) {
-            frame << " in " << line.FileName << ":" << line.LineNumber;
+        if (SymGetLineFromAddrW64(process, address, &lineDisplacement, &line)) {
+            frame << " in " << WideToUtf8(line.FileName) << ":" << line.LineNumber;
         }
 
         frame << " [" << FormatAddress(address) << "]";
@@ -339,7 +421,7 @@ namespace {
             AppendRawLog(std::format(
                 "[{}] [FATAL] Failed to create minidump {}. Error: {}\n",
                 MakeTimestamp(false),
-                tempDumpPath.string(),
+                PathToUtf8(tempDumpPath),
                 LastErrorToString(GetLastError())
             ));
             return {};
@@ -361,15 +443,19 @@ namespace {
             MiniDumpWithFullMemoryInfo
         );
 
-        BOOL wroteDump = MiniDumpWriteDump(
-            GetCurrentProcess(),
-            GetCurrentProcessId(),
-            dumpFile,
-            dumpType,
-            exceptionInfo ? &dumpException : nullptr,
-            nullptr,
-            nullptr
-        );
+        BOOL wroteDump = FALSE;
+        {
+            CriticalSectionGuard symbolGuard(EnterSymbolLock, LeaveSymbolLock);
+            wroteDump = MiniDumpWriteDump(
+                GetCurrentProcess(),
+                GetCurrentProcessId(),
+                dumpFile,
+                dumpType,
+                exceptionInfo ? &dumpException : nullptr,
+                nullptr,
+                nullptr
+            );
+        }
 
         DWORD error = wroteDump ? ERROR_SUCCESS : GetLastError();
         FlushFileBuffers(dumpFile);
@@ -379,7 +465,7 @@ namespace {
             AppendRawLog(std::format(
                 "[{}] [FATAL] MiniDumpWriteDump failed for {}. Error: {}\n",
                 MakeTimestamp(false),
-                tempDumpPath.string(),
+                PathToUtf8(tempDumpPath),
                 LastErrorToString(error)
             ));
             DeleteFileW(tempDumpPath.wstring().c_str());
@@ -390,7 +476,7 @@ namespace {
             AppendRawLog(std::format(
                 "[{}] [FATAL] Failed to finalize minidump {}. Error: {}\n",
                 MakeTimestamp(false),
-                dumpPath.string(),
+                PathToUtf8(dumpPath),
                 LastErrorToString(GetLastError())
             ));
             DeleteFileW(tempDumpPath.wstring().c_str());
@@ -402,15 +488,23 @@ namespace {
 
     LONG WINAPI TopLevelUnhandledExceptionFilter(EXCEPTION_POINTERS* exceptionInfo) {
         DebugExceptionHandler::WriteCrashReport(exceptionInfo, "Unhandled native exception");
-        return EXCEPTION_EXECUTE_HANDLER;
+
+        auto previousFilter = previousUnhandledExceptionFilter;
+        if (previousFilter && previousFilter != TopLevelUnhandledExceptionFilter) {
+            return previousFilter(exceptionInfo);
+        }
+
+        return EXCEPTION_CONTINUE_SEARCH;
     }
 
     void __cdecl TerminateHandler() {
         std::string reason = "std::terminate called";
+        bool hasCurrentException = false;
 
         try {
             auto currentException = std::current_exception();
             if (currentException) {
+                hasCurrentException = true;
                 std::rethrow_exception(currentException);
             }
         }
@@ -422,7 +516,7 @@ namespace {
         }
 
         CONTEXT context = {};
-        if (g_bHasCxxExceptionContext) {
+        if (hasCurrentException && g_bHasCxxExceptionContext) {
             context = g_CxxExceptionContext;
         }
         else {
@@ -442,7 +536,13 @@ namespace {
         exceptionInfo.ContextRecord = &context;
 
         DebugExceptionHandler::WriteCrashReport(&exceptionInfo, reason);
-        ExitProcess(1);
+
+        auto previousHandler = previousTerminateHandler;
+        if (previousHandler && previousHandler != TerminateHandler) {
+            previousHandler();
+        }
+
+        DebugExceptionHandler::AbortProcess();
     }
 }
 
@@ -452,6 +552,7 @@ void __cdecl translate_seh_to_cpp_exception(unsigned int, EXCEPTION_POINTERS* pE
 
 __declspec(thread) CONTEXT g_CxxExceptionContext = {};
 __declspec(thread) bool g_bHasCxxExceptionContext = false;
+__declspec(thread) int g_ErrorBoundaryDepth = 0;
 
 LONG WINAPI VectoredExceptionHandler(PEXCEPTION_POINTERS pExceptionInfo) {
     if (pExceptionInfo && pExceptionInfo->ExceptionRecord &&
@@ -464,50 +565,98 @@ LONG WINAPI VectoredExceptionHandler(PEXCEPTION_POINTERS pExceptionInfo) {
     return EXCEPTION_CONTINUE_SEARCH;
 }
 
+void DebugExceptionHandler::InstallForCurrentThread() {
+    _set_se_translator(translate_seh_to_cpp_exception);
+}
+
+void DebugExceptionHandler::PrepareErrorBoundary() {
+    InstallForCurrentThread();
+    g_CxxExceptionContext = {};
+    g_bHasCxxExceptionContext = false;
+}
+
+DebugExceptionHandler::ErrorBoundaryScope::ErrorBoundaryScope() {
+    PrepareErrorBoundary();
+    ++g_ErrorBoundaryDepth;
+}
+
+DebugExceptionHandler::ErrorBoundaryScope::~ErrorBoundaryScope() {
+    if (g_ErrorBoundaryDepth > 0) {
+        --g_ErrorBoundaryDepth;
+    }
+
+    if (g_ErrorBoundaryDepth == 0) {
+        g_CxxExceptionContext = {};
+        g_bHasCxxExceptionContext = false;
+    }
+}
+
 void DebugExceptionHandler::Install() {
+    InstallForCurrentThread();
+
     try {
         std::filesystem::create_directories(CrashPath());
     }
     catch (...) {
     }
 
-    _set_se_translator(translate_seh_to_cpp_exception);
+    {
+        CriticalSectionGuard handlerGuard(EnterHandlerLock, LeaveHandlerLock);
+        if (handlersInstalled) {
+            return;
+        }
 
-    if (!vectoredHandler) {
         vectoredHandler = AddVectoredExceptionHandler(1, VectoredExceptionHandler);
+        previousUnhandledExceptionFilter = SetUnhandledExceptionFilter(TopLevelUnhandledExceptionFilter);
+        previousTerminateHandler = std::set_terminate(TerminateHandler);
+        handlersInstalled = true;
     }
-
-    previousUnhandledExceptionFilter = SetUnhandledExceptionFilter(TopLevelUnhandledExceptionFilter);
-    previousTerminateHandler = std::set_terminate(TerminateHandler);
-
-    EnterSymbolLock();
-    EnsureSymbolsLocked();
-    LeaveSymbolLock();
 }
 
 void DebugExceptionHandler::Uninstall() {
-    if (vectoredHandler) {
-        RemoveVectoredExceptionHandler(vectoredHandler);
-        vectoredHandler = nullptr;
-    }
+    {
+        CriticalSectionGuard handlerGuard(EnterHandlerLock, LeaveHandlerLock);
+        if (!handlersInstalled) {
+            return;
+        }
 
-    SetUnhandledExceptionFilter(previousUnhandledExceptionFilter);
-    if (previousTerminateHandler) {
-        std::set_terminate(previousTerminateHandler);
+        if (vectoredHandler) {
+            RemoveVectoredExceptionHandler(vectoredHandler);
+            vectoredHandler = nullptr;
+        }
+
+        auto currentUnhandledFilter = SetUnhandledExceptionFilter(previousUnhandledExceptionFilter);
+        if (currentUnhandledFilter != TopLevelUnhandledExceptionFilter) {
+            SetUnhandledExceptionFilter(currentUnhandledFilter);
+        }
+
+        if (previousTerminateHandler) {
+            auto currentTerminateHandler = std::set_terminate(previousTerminateHandler);
+            if (currentTerminateHandler != TerminateHandler) {
+                std::set_terminate(currentTerminateHandler);
+            }
+        }
+
+        previousUnhandledExceptionFilter = nullptr;
         previousTerminateHandler = nullptr;
+        handlersInstalled = false;
     }
 
-    EnterSymbolLock();
-    if (symbolsInitialized && ownsSymbolHandler) {
-        SymCleanup(GetCurrentProcess());
-    }
-    symbolsInitialized = false;
-    ownsSymbolHandler = false;
-    LeaveSymbolLock();
+    CriticalSectionGuard symbolGuard(EnterSymbolLock, LeaveSymbolLock);
+    // DbgHelp is process-global. Leave any initialized session alive rather
+    // than tearing it down under another component in the host process.
 }
 
 bool DebugExceptionHandler::IsHandlingCrash() {
     return crashHandlerEntered.load() != 0;
+}
+
+[[noreturn]] void DebugExceptionHandler::AbortProcess() {
+    std::abort();
+    TerminateProcess(GetCurrentProcess(), 1);
+    for (;;) {
+        Sleep(INFINITE);
+    }
 }
 
 std::string DebugExceptionHandler::GenerateStackTrace(CONTEXT* contextArg) {
@@ -529,7 +678,7 @@ std::string DebugExceptionHandler::GenerateStackTrace(CONTEXT* contextArg) {
     std::ostringstream stackTrace;
     stackTrace << "\n--- Stack Trace ---\n";
 
-    EnterSymbolLock();
+    CriticalSectionGuard symbolGuard(EnterSymbolLock, LeaveSymbolLock);
     bool haveSymbols = EnsureSymbolsLocked();
 
     for (int frameIndex = 0; frameIndex < 128; frameIndex++) {
@@ -561,7 +710,6 @@ std::string DebugExceptionHandler::GenerateStackTrace(CONTEXT* contextArg) {
         stackTrace << "\n";
     }
 
-    LeaveSymbolLock();
     return stackTrace.str();
 }
 
@@ -611,6 +759,9 @@ std::filesystem::path DebugExceptionHandler::WriteCrashReport(EXCEPTION_POINTERS
     );
 #endif
 
+    auto attemptedDumpPath = CrashPath() / (baseName + ".dmp");
+    auto dumpPath = WriteMiniDump(exceptionInfo, baseName);
+
     std::ostringstream report;
     report << "\n";
     report << "========== Latite Client Crash Report ==========\n";
@@ -627,26 +778,31 @@ std::filesystem::path DebugExceptionHandler::WriteCrashReport(EXCEPTION_POINTERS
 
     auto latiteModulePath = GetModuleFilePath(GetLatiteModule());
     if (!latiteModulePath.empty()) {
-        report << "Latite Module: " << latiteModulePath.string() << "\n";
+        report << "Latite Module: " << PathToUtf8(latiteModulePath) << "\n";
     }
 
-    report << "Minidump: attempting " << (CrashPath() / (baseName + ".dmp")).string() << "\n";
+    report << "Minidump: attempting " << PathToUtf8(attemptedDumpPath) << "\n";
+    if (!dumpPath.empty()) {
+        report << "Minidump Result: written " << PathToUtf8(dumpPath) << "\n";
+    }
+    else {
+        report << "Minidump Result: unavailable\n";
+    }
     report << "==============================================\n";
     AppendRawLog(report.str());
 
-    auto dumpPath = WriteMiniDump(exceptionInfo, baseName);
-
-    std::ostringstream dumpResult;
-    if (!dumpPath.empty()) {
-        dumpResult << "[" << MakeTimestamp(false) << "] [FATAL] Minidump written: " << dumpPath.string() << "\n";
-    }
-    else {
-        dumpResult << "[" << MakeTimestamp(false) << "] [FATAL] Minidump unavailable.\n";
-    }
-    AppendRawLog(dumpResult.str());
-
     std::ostringstream stackReport;
-    stackReport << GenerateStackTrace(&context);
+    try {
+        stackReport << GenerateStackTrace(&context);
+    }
+    catch (std::exception const& e) {
+        stackReport << "\n--- Stack Trace ---\n";
+        stackReport << "Stack trace unavailable: " << e.what() << "\n";
+    }
+    catch (...) {
+        stackReport << "\n--- Stack Trace ---\n";
+        stackReport << "Stack trace unavailable due to an unknown error.\n";
+    }
     stackReport << "==============================================\n";
     AppendRawLog(stackReport.str());
 
@@ -655,6 +811,28 @@ std::filesystem::path DebugExceptionHandler::WriteCrashReport(EXCEPTION_POINTERS
 
 void LogExceptionDetails(StructuredException& ex) {
     DebugExceptionHandler::WriteCrashReport(ex.getExceptionPointers(), "Caught SEH exception at Latite error boundary");
+}
+
+void LogUnknownExceptionDetails(std::string_view reason) {
+    CONTEXT context = {};
+    RtlCaptureContext(&context);
+
+    EXCEPTION_RECORD exceptionRecord = {};
+    exceptionRecord.ExceptionCode = cppExceptionCode;
+#if defined(_M_X64)
+    exceptionRecord.ExceptionAddress = reinterpret_cast<void*>(context.Rip);
+#elif defined(_M_IX86)
+    exceptionRecord.ExceptionAddress = reinterpret_cast<void*>(context.Eip);
+#endif
+
+    EXCEPTION_POINTERS exceptionInfo = {};
+    exceptionInfo.ExceptionRecord = &exceptionRecord;
+    exceptionInfo.ContextRecord = &context;
+
+    g_CxxExceptionContext = {};
+    g_bHasCxxExceptionContext = false;
+
+    DebugExceptionHandler::WriteCrashReport(&exceptionInfo, reason);
 }
 
 void LogExceptionDetails(const std::exception& e) {
@@ -678,6 +856,9 @@ void LogExceptionDetails(const std::exception& e) {
     EXCEPTION_POINTERS exceptionInfo = {};
     exceptionInfo.ExceptionRecord = &exceptionRecord;
     exceptionInfo.ContextRecord = &context;
+
+    g_CxxExceptionContext = {};
+    g_bHasCxxExceptionContext = false;
 
     DebugExceptionHandler::WriteCrashReport(
         &exceptionInfo,
