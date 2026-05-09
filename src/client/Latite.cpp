@@ -1147,28 +1147,3 @@ void Latite::loadConfig(SettingGroup& gr) {
             });
         });
 }
-
-void Latite::writeServerIP() {
-    std::string server;
-    std::filesystem::path serverIPTextPath = util::GetLatitePath() / "serverip.txt";
-
-    SDK::RakNetConnector* connector = SDK::RakNetConnector::get();
-    if (connector && !connector->dns.empty()) {
-        server = connector->dns;
-    }
-    else {
-        server = "none";
-    }
-
-    static std::string lastServer = "";
-    if (server != lastServer) {
-        std::ofstream ofs(serverIPTextPath, std::ios::trunc);
-        if (ofs.is_open()) {
-            if (!ofs.fail()) {
-                ofs << server;
-                ofs.close();
-            }
-        }
-    }
-    lastServer = server;
-}
