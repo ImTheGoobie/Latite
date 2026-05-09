@@ -97,6 +97,24 @@ namespace {
 /*return {&Signatures_1_18_12::__VA_ARGS__, &Signatures::__VA_ARGS__}; }*/\
 )()
 
+#define LATITE_EXPORT extern "C" __declspec(dllexport)
+
+LATITE_EXPORT const char* LatiteGetDllVersion() noexcept {
+    return Latite::version.data();
+}
+
+LATITE_EXPORT uint32_t LatiteGetSupportedMinecraftVersionCount() noexcept {
+    return Latite::supportedMinecraftVersions.size();
+}
+
+LATITE_EXPORT const char* LatiteGetSupportedMinecraftVersion(uint32_t index) noexcept {
+    if (index >= Latite::supportedMinecraftVersions.size()) {
+        return nullptr;
+    }
+
+    return Latite::supportedMinecraftVersions[index].data();
+}
+
 DWORD __stdcall startThreadImpl(HINSTANCE dll) {
     BEGIN_ERROR_HANDLER
     // Needed for Logger
@@ -171,18 +189,15 @@ DWORD __stdcall startThreadImpl(HINSTANCE dll) {
     int sigCount = 0;
     int deadCount = 0;
 
-    std::array versNumMap = {"1.26.10", "1.26.11", "1.26.12"};
-
-    if (std::ranges::find(versNumMap.begin(), versNumMap.end(), Latite::get().gameVersion) != versNumMap.end()) {
+    if (Latite::supportsMinecraftVersion(Latite::get().gameVersion)) {
         // not needed as it will always just be latest
-        //auto vers =  versNumMap[Latite::get().gameVersion];
         //SDK::internalVers = vers;
     }
     else {
         std::stringstream ss;
         ss << "Latite Client does not support your version: " << Latite::get().gameVersion << ". Latite only supports the following versions:\n\n";
 
-        for (auto& key : versNumMap) {
+        for (const auto key : Latite::supportedMinecraftVersions) {
             ss << key << "\n";
         }
 

@@ -1,4 +1,5 @@
 ﻿#pragma once
+#include <array>
 #include <string_view>
 #include "client/event/Listener.h"
 #include "client/feature/setting/Setting.h"
@@ -54,6 +55,21 @@ public:
 	~Latite() = default;
 
 	static constexpr std::string_view version = "v2.6.2";
+	static constexpr std::array<std::string_view, 3> supportedMinecraftVersions = {
+		"1.26.10",
+		"1.26.11",
+		"1.26.12",
+	};
+
+	[[nodiscard]] static constexpr bool supportsMinecraftVersion(std::string_view version) noexcept {
+		for (const auto supportedVersion : supportedMinecraftVersions) {
+			if (supportedVersion == version) {
+				return true;
+			}
+		}
+		return false;
+	}
+
 	HINSTANCE dllInst = NULL;
 	std::string gameVersion;
 
