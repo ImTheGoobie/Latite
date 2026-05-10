@@ -139,6 +139,14 @@ namespace {
         return oss.str();
     }
 
+    std::string BuildTimestamp() {
+#if defined(LATITE_BUILD_TIMESTAMP)
+        return LATITE_BUILD_TIMESTAMP;
+#else
+        return "unknown";
+#endif
+    }
+
     std::filesystem::path LogsPath() {
         return util::GetLatitePath() / "Logs";
     }
@@ -397,15 +405,49 @@ namespace {
         stackFrame.AddrStack.Mode = AddrModeFlat;
     }
 
-    std::filesystem::path WriteMiniDump(EXCEPTION_POINTERS* exceptionInfo, std::string const& baseName) {
-        try {
-            std::filesystem::create_directories(CrashPath());
-        }
-        catch (...) {
-        }
+    struct MiniDumpResults {
+        std::filesystem::path primaryAttemptedPath;
+        std::filesystem::path primaryPath;
+        std::filesystem::path analysisAttemptedPath;
+        std::filesystem::path analysisPath;
+        bool primaryDeletedAfterAnalysis = false;
+        DWORD primaryDeleteError = ERROR_SUCCESS;
+    };
 
-        auto dumpPath = CrashPath() / (baseName + ".dmp");
-        auto tempDumpPath = CrashPath() / (baseName + ".dmp.tmp");
+    MINIDUMP_TYPE PrimaryMiniDumpType() {
+        return static_cast<MINIDUMP_TYPE>(
+            MiniDumpNormal |
+            MiniDumpWithDataSegs |
+            MiniDumpWithThreadInfo |
+            MiniDumpWithUnloadedModules |
+            MiniDumpWithFullMemoryInfo
+        );
+    }
+
+    MINIDUMP_TYPE AnalysisMiniDumpType() {
+        return static_cast<MINIDUMP_TYPE>(
+            PrimaryMiniDumpType() |
+            MiniDumpWithHandleData |
+            MiniDumpWithProcessThreadData |
+            MiniDumpWithIndirectlyReferencedMemory |
+            MiniDumpScanMemory |
+            MiniDumpWithCodeSegs |
+            MiniDumpWithModuleHeaders |
+            MiniDumpWithAvxXStateContext |
+            MiniDumpIgnoreInaccessibleMemory
+        );
+    }
+
+    std::filesystem::path WriteMiniDumpFile(
+        EXCEPTION_POINTERS* exceptionInfo,
+        std::filesystem::path const& dumpPath,
+        MINIDUMP_TYPE dumpType,
+        std::string_view failureLevel,
+        std::string_view dumpLabel
+    ) {
+        auto tempDumpPath = dumpPath;
+        tempDumpPath += L".tmp";
+
         HANDLE dumpFile = CreateFileW(
             tempDumpPath.wstring().c_str(),
             GENERIC_WRITE,
@@ -418,8 +460,10 @@ namespace {
 
         if (dumpFile == INVALID_HANDLE_VALUE) {
             AppendRawLog(std::format(
-                "[{}] [FATAL] Failed to create minidump {}. Error: {}\n",
+                "[{}] [{}] Failed to create {} minidump {}. Error: {}\n",
                 MakeTimestamp(false),
+                failureLevel,
+                dumpLabel,
                 PathToUtf8(tempDumpPath),
                 LastErrorToString(GetLastError())
             ));
@@ -430,17 +474,6 @@ namespace {
         dumpException.ThreadId = GetCurrentThreadId();
         dumpException.ExceptionPointers = exceptionInfo;
         dumpException.ClientPointers = FALSE;
-
-        // Keep the primary dump conservative. More aggressive flags such as
-        // MiniDumpWithIndirectlyReferencedMemory can fault again when the crash
-        // was caused by corrupt SDK pointers or invalid offsets.
-        auto dumpType = static_cast<MINIDUMP_TYPE>(
-            MiniDumpNormal |
-            MiniDumpWithDataSegs |
-            MiniDumpWithThreadInfo |
-            MiniDumpWithUnloadedModules |
-            MiniDumpWithFullMemoryInfo
-        );
 
         BOOL wroteDump = FALSE;
         {
@@ -462,8 +495,10 @@ namespace {
 
         if (!wroteDump) {
             AppendRawLog(std::format(
-                "[{}] [FATAL] MiniDumpWriteDump failed for {}. Error: {}\n",
+                "[{}] [{}] MiniDumpWriteDump failed for {} minidump {}. Error: {}\n",
                 MakeTimestamp(false),
+                failureLevel,
+                dumpLabel,
                 PathToUtf8(tempDumpPath),
                 LastErrorToString(error)
             ));
@@ -473,8 +508,10 @@ namespace {
 
         if (!MoveFileExW(tempDumpPath.wstring().c_str(), dumpPath.wstring().c_str(), MOVEFILE_REPLACE_EXISTING)) {
             AppendRawLog(std::format(
-                "[{}] [FATAL] Failed to finalize minidump {}. Error: {}\n",
+                "[{}] [{}] Failed to finalize {} minidump {}. Error: {}\n",
                 MakeTimestamp(false),
+                failureLevel,
+                dumpLabel,
                 PathToUtf8(dumpPath),
                 LastErrorToString(GetLastError())
             ));
@@ -483,6 +520,55 @@ namespace {
         }
 
         return dumpPath;
+    }
+
+    MiniDumpResults WriteMiniDumps(EXCEPTION_POINTERS* exceptionInfo, std::string const& baseName) {
+        try {
+            std::filesystem::create_directories(CrashPath());
+        }
+        catch (...) {
+        }
+
+        MiniDumpResults results = {};
+        results.primaryAttemptedPath = CrashPath() / (baseName + ".dmp");
+        results.analysisAttemptedPath = CrashPath() / (baseName + "-analysis.dmp");
+
+        // first attempt a lighter dump to avoid causing more errors
+        results.primaryPath = WriteMiniDumpFile(
+            exceptionInfo,
+            results.primaryAttemptedPath,
+            PrimaryMiniDumpType(),
+            "FATAL",
+            "primary"
+        );
+
+        if (!results.primaryPath.empty()) {
+            // also attempt an analysis dump thats richer
+            results.analysisPath = WriteMiniDumpFile(
+                exceptionInfo,
+                results.analysisAttemptedPath,
+                AnalysisMiniDumpType(),
+                "WARN",
+                "analysis"
+            );
+
+            if (!results.analysisPath.empty()) {
+                if (DeleteFileW(results.primaryPath.wstring().c_str())) {
+                    results.primaryDeletedAfterAnalysis = true;
+                }
+                else {
+                    results.primaryDeleteError = GetLastError();
+                    AppendRawLog(std::format(
+                        "[{}] [WARN] Failed to delete primary minidump {} after analysis minidump was written. Error: {}\n",
+                        MakeTimestamp(false),
+                        PathToUtf8(results.primaryPath),
+                        LastErrorToString(results.primaryDeleteError)
+                    ));
+                }
+            }
+        }
+
+        return results;
     }
 
     LONG WINAPI TopLevelUnhandledExceptionFilter(EXCEPTION_POINTERS* exceptionInfo) {
@@ -789,8 +875,7 @@ std::filesystem::path DebugExceptionHandler::WriteCrashReport(EXCEPTION_POINTERS
     );
 #endif
 
-    auto attemptedDumpPath = CrashPath() / (baseName + ".dmp");
-    auto dumpPath = WriteMiniDump(exceptionInfo, baseName);
+    auto dumpResults = WriteMiniDumps(exceptionInfo, baseName);
 
     std::ostringstream report;
     report << "\n";
@@ -810,13 +895,35 @@ std::filesystem::path DebugExceptionHandler::WriteCrashReport(EXCEPTION_POINTERS
     if (!latiteModulePath.empty()) {
         report << "Latite Module: " << PathToUtf8(latiteModulePath) << "\n";
     }
+    report << "Build Timestamp: " << BuildTimestamp() << "\n";
 
-    report << "Minidump: attempting " << PathToUtf8(attemptedDumpPath) << "\n";
-    if (!dumpPath.empty()) {
-        report << "Minidump Result: written " << PathToUtf8(dumpPath) << "\n";
+    report << "Minidump: attempting " << PathToUtf8(dumpResults.primaryAttemptedPath) << "\n";
+    if (!dumpResults.primaryPath.empty()) {
+        if (dumpResults.primaryDeletedAfterAnalysis) {
+            report << "Minidump Result: deleted after analysis minidump succeeded " << PathToUtf8(dumpResults.primaryPath) << "\n";
+        }
+        else {
+            report << "Minidump Result: written " << PathToUtf8(dumpResults.primaryPath);
+            if (!dumpResults.analysisPath.empty() && dumpResults.primaryDeleteError != ERROR_SUCCESS) {
+                report << " (delete after analysis failed, error " << LastErrorToString(dumpResults.primaryDeleteError) << ")";
+            }
+            report << "\n";
+        }
     }
     else {
         report << "Minidump Result: unavailable\n";
+    }
+    if (!dumpResults.primaryPath.empty()) {
+        report << "Analysis Minidump: attempting " << PathToUtf8(dumpResults.analysisAttemptedPath) << "\n";
+        if (!dumpResults.analysisPath.empty()) {
+            report << "Analysis Minidump Result: written " << PathToUtf8(dumpResults.analysisPath) << "\n";
+        }
+        else {
+            report << "Analysis Minidump Result: unavailable\n";
+        }
+    }
+    else {
+        report << "Analysis Minidump: skipped because the primary minidump was unavailable\n";
     }
     report << "==============================================\n";
     AppendRawLog(report.str());
@@ -836,7 +943,7 @@ std::filesystem::path DebugExceptionHandler::WriteCrashReport(EXCEPTION_POINTERS
     stackReport << "==============================================\n";
     AppendRawLog(stackReport.str());
 
-    return dumpPath;
+    return !dumpResults.analysisPath.empty() ? dumpResults.analysisPath : dumpResults.primaryPath;
 }
 
 void LogUnknownExceptionDetails(std::string_view reason) {
