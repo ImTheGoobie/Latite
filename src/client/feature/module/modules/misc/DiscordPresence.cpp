@@ -5,6 +5,51 @@
 #include "client/event/events/UpdateEvent.h"
 #include "mc/common/network/RakNetConnector.h"
 
+namespace {
+	struct PresenceDetails {
+		std::string_view address;
+		std::string_view name;
+		std::string_view logoKey;
+		std::string_view logoTooltip;
+	};
+
+	constexpr std::array knownServers = {
+		PresenceDetails{ "hivebedrock.network", "The Hive", "thehive", "The Hive Logo" },
+		PresenceDetails{ "cubecraft.net", "CubeCraft", "cubecraft", "CubeCraft Games Logo" },
+		PresenceDetails{ "play.galaxite.net", "Galaxite", "galaxite", "Galaxite Network Logo" },
+		PresenceDetails{ "zeqa.net", "Zeqa", "zeqa", "Zeqa Practice Logo" },
+		PresenceDetails{ "nethergames.org", "NetherGames", "nethergames", "NetherGames Network Logo" }
+	};
+
+	const PresenceDetails* findServerPresence(std::string_view serverAddress) {
+		for (const auto& server : knownServers) {
+			if (serverAddress.find(server.address) != std::string_view::npos) {
+				return &server;
+			}
+		}
+
+		return nullptr;
+	}
+
+	void useMinecraftAssets(DiscordIpcClient::Activity& activity) {
+		activity.largeImageKey = "minecraft";
+		activity.largeImageText = "Minecraft Bedrock Logo";
+		activity.smallImageKey = "latite";
+		activity.smallImageText = "Latite Client Logo";
+	}
+
+	void useLatiteAsset(DiscordIpcClient::Activity& activity) {
+		activity.largeImageKey = "latite";
+		activity.largeImageText = "Latite Client Logo";
+		activity.smallImageKey.clear();
+		activity.smallImageText.clear();
+	}
+
+	std::int64_t nowUnixSeconds() {
+		return std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
+	}
+}
+
 DiscordPresence::DiscordPresence() : Module(
 	"DiscordPresence",
 	LocalizeString::get("client.module.discordPresence.name"),
@@ -20,7 +65,7 @@ DiscordPresence::~DiscordPresence() {
 
 void DiscordPresence::onEnable() {
 	if (sessionStart <= 0) {
-		sessionStart = DiscordPresence::nowUnixSeconds();
+		sessionStart = nowUnixSeconds();
 	}
 	lastCheck = {};
 	lastRefresh = {};
@@ -76,38 +121,54 @@ void DiscordPresence::publishPresence(bool force) {
 
 DiscordIpcClient::Activity DiscordPresence::makeActivity() const {
 	DiscordIpcClient::Activity activity;
-	activity.details = Latite::get().gameVersion.empty()
-		? "Minecraft"
-		: std::format("Minecraft {}", Latite::get().gameVersion);
-	activity.state = DiscordPresence::getPresenceState();
-	activity.startTimestamp = sessionStart > 0 ? sessionStart : DiscordPresence::nowUnixSeconds();
-	return activity;
-}
+	activity.startTimestamp = sessionStart > 0 ? sessionStart : nowUnixSeconds();
 
-std::string DiscordPresence::getPresenceState() const {
 	SDK::ClientInstance* clientInstance = SDK::ClientInstance::get();
 	if (!clientInstance || !clientInstance->minecraft || !clientInstance->minecraft->getLevel() || !clientInstance->getLocalPlayer()) {
-		return "In menus";
+		activity.details = "Playing Minecraft Bedrock";
+		activity.state = "In menus";
+
+		useLatiteAsset(activity);
+		return activity;
 	}
 
 	SDK::RakNetConnector* connector = SDK::RakNetConnector::get();
 	if (connector) {
-		if (!connector->featuredServer.empty()) {
-			return "On " + connector->featuredServer;
-		}
+		const std::string serverAddress = !connector->dns.empty() ? connector->dns : connector->ipAddress;
+		if (const PresenceDetails* server = findServerPresence(serverAddress)) {
+			activity.details = "Playing Minecraft Bedrock";
+			activity.state = std::string(server->name);
 
-		if (!connector->dns.empty()) {
-			std::string server = connector->dns;
-			if (connector->port != 19132) {
-				server += std::format(":{}", connector->port);
-			}
-			return "On " + server;
+			activity.largeImageKey = std::string(server->logoKey);
+			activity.largeImageText = std::string(server->logoTooltip);
+			activity.smallImageKey = "latite";
+			activity.smallImageText = "Latite Client Logo";
+			return activity;
 		}
 	}
 
-	return "Singleplayer";
+	activity.details = "Playing Minecraft Bedrock";
+	activity.state = getPresenceState();
+	useMinecraftAssets(activity);
+	return activity;
 }
 
-std::int64_t DiscordPresence::nowUnixSeconds() const {
-	return std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
+std::string DiscordPresence::getPresenceState() const {
+    SDK::RakNetConnector* connector = SDK::RakNetConnector::get();
+	// path for generic servers
+    if (connector) {
+        if (!connector->featuredServer.empty()) {
+            return connector->featuredServer;
+        }
+
+        if (!connector->dns.empty()) {
+            std::string server = connector->dns;
+            if (connector->port != 19132) {
+                server += std::format(":{}", connector->port);
+            }
+            return server;
+        }
+    }
+
+    return "Singleplayer";
 }

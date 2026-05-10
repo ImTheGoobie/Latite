@@ -13,6 +13,10 @@ public:
 	struct Activity {
 		std::string details;
 		std::string state;
+		std::string largeImageKey = "latite";
+		std::string largeImageText = "Latite Client Logo";
+		std::string smallImageKey;
+		std::string smallImageText;
 		std::int64_t startTimestamp = 0;
 
 		bool operator==(const Activity&) const = default;

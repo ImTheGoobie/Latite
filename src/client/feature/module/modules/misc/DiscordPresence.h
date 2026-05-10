@@ -20,7 +20,6 @@ private:
 	void publishPresence(bool force);
 	DiscordIpcClient::Activity makeActivity() const;
 	std::string getPresenceState() const;
-	std::int64_t nowUnixSeconds() const;
 
 	std::optional<DiscordIpcClient> ipcClient;
 	std::optional<DiscordIpcClient::Activity> lastSentActivity;
