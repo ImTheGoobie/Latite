@@ -6,6 +6,7 @@
 #include "modules/misc/ItemTweaks.h"
 #include "modules/misc/DebugInfo.h"
 #include "modules/misc/CommandShortcuts.h"
+#include "modules/misc/DiscordPresence.h"
 #include "modules/misc/BlockGame.h"
 
 #include "modules/game/Zoom.h"
@@ -88,6 +89,7 @@ ModuleManager::ModuleManager() {
 	this->items.push_back(std::make_shared<ThirdPersonNametag>());
 	this->items.push_back(std::make_shared<EnvironmentChanger>());
 	this->items.push_back(std::make_shared<CommandShortcuts>());
+	this->items.push_back(std::make_shared<DiscordPresence>());
 	this->items.push_back(std::make_shared<ItemCounter>());
 	//this->items.push_back(std::make_shared<Chat>());
 	this->items.push_back(std::make_shared<TextHotkey>());
