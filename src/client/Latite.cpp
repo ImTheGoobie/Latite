@@ -1,6 +1,7 @@
 ﻿#include "pch.h"
 // LatiteRecode.cpp : Defines the entry point for the application.
 //
+#include <array>
 #include <cstdint>
 #include <regex>
 
@@ -36,8 +37,6 @@
 #include "mc/common/client/game/FontRepository.h"
 #include <winrt/windows.ui.viewmanagement.h>
 #include <winrt/windows.storage.streams.h>
-#include <winrt/windows.security.cryptography.h>
-#include <winrt/windows.security.cryptography.core.h>
 #include <winrt/windows.system.userprofile.h>
 // this looks like its unused, but this provides types for language.DisplayName(). compilation will fail without it.
 #include <winrt/windows.globalization.h>
@@ -87,6 +86,80 @@ namespace {
         DWORD fdwReason;
         LPVOID reserved;
     };
+
+    constexpr bool isDigit(char ch) {
+        return ch >= '0' && ch <= '9';
+    }
+
+    constexpr int parseFixedNumber(std::string_view text, bool allowSpaces = false) {
+        int value = 0;
+        bool foundDigit = false;
+
+        for (char ch : text) {
+            if (allowSpaces && ch == ' ') {
+                continue;
+            }
+
+            if (!isDigit(ch)) {
+                return 0;
+            }
+
+            value = (value * 10) + (ch - '0');
+            foundDigit = true;
+        }
+
+        return foundDigit ? value : 0;
+    }
+
+    constexpr int parseCompileMonth(std::string_view month) {
+        constexpr std::array<std::string_view, 12> months{
+            "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+            "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
+        };
+
+        for (std::size_t index = 0; index < months.size(); ++index) {
+            if (month == months[index]) {
+                return static_cast<int>(index + 1);
+            }
+        }
+
+        return 0;
+    }
+
+    constexpr bool isCompileTime(std::string_view time) {
+        return time.size() == 8 &&
+            isDigit(time[0]) &&
+            isDigit(time[1]) &&
+            time[2] == ':' &&
+            isDigit(time[3]) &&
+            isDigit(time[4]) &&
+            time[5] == ':' &&
+            isDigit(time[6]) &&
+            isDigit(time[7]);
+    }
+
+    std::string getCompilerTimestamp() {
+        constexpr std::string_view compileDate = __DATE__;
+        constexpr std::string_view compileTime = __TIME__;
+
+        constexpr int month = parseCompileMonth(compileDate.substr(0, 3));
+        constexpr int day = parseFixedNumber(compileDate.substr(4, 2), true);
+        constexpr int year = parseFixedNumber(compileDate.substr(7, 4));
+
+        if constexpr (month == 0 || day == 0 || year == 0 || !isCompileTime(compileTime)) {
+            return "unknown";
+        }
+
+        return std::format(
+            "{:04}{:02}{:02}-{}{}{}",
+            year,
+            month,
+            day,
+            compileTime.substr(0, 2),
+            compileTime.substr(3, 2),
+            compileTime.substr(6, 2)
+        );
+    }
 }
 
 #define MVSIG(...) ([]() -> std::pair<SigImpl*, SigImpl*> {\
@@ -543,9 +616,9 @@ void Latite::threadsafeInit() {
     std::string vstr(this->version);
 	
 #if defined(LATITE_NIGHTLY)
-    auto ws = util::StrToWStr("Latite Client [NIGHTLY] " + gameVersion + " " + vstr + "/" + calcCurrentDLLHash());
+    auto ws = util::StrToWStr("Latite Client [NIGHTLY] " + gameVersion + " " + vstr + "/" + getBuildTimestamp());
 #elif defined(LATITE_DEBUG)
-    auto ws = util::StrToWStr("Latite Client [DEBUG] " + gameVersion + " " + vstr + "/" + calcCurrentDLLHash());
+    auto ws = util::StrToWStr("Latite Client [DEBUG] " + gameVersion + " " + vstr + "/" + getBuildTimestamp());
 #else
     auto ws = util::StrToWStr("Latite Client " + vstr);
 #endif
@@ -611,66 +684,12 @@ void Latite::updateModuleBlocking() {
     }
 }
 
-namespace {
-    HttpClient client{};
-}
-
-
-// TODO: Remove this, there's no point of it being here
-std::string Latite::fetchLatestGitHash() {
-    std::string url = "https://api.github.com/repos/LatiteClient/Latite/commits/master";
-    HttpClient client;
-    winrt::Windows::Foundation::Uri uri(winrt::to_hstring(url));
-
-    HttpRequestMessage request(HttpMethod::Get(), uri);
-    request.Headers().Insert(winrt::to_hstring("User-Agent"), winrt::to_hstring("WinRTApp"));
-
-    auto response = client.SendRequestAsync(request).get();
-    if (response.StatusCode() != HttpStatusCode::Ok) {
-        return "hash unknown";
-    }
-
-    auto jsonResponse = winrt::to_string(response.Content().ReadAsStringAsync().get());
-
-    auto json = nlohmann::json::parse(jsonResponse);
-    return json["sha"];
-}
-
-// Also remove this
-std::string Latite::calcCurrentDLLHash() {
-    std::wstring dllPath = Latite::get().GetCurrentModuleFilePath(dllInst);
-
-    std::ifstream file(dllPath, std::ios::binary);
-    if (!file.is_open()) {
-        return "Failed to open file";
-    }
-
-    std::vector<char> fileContent((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
-    std::string header = "blob " + std::to_string(fileContent.size()) + '\0';
-
-    std::vector<unsigned char> data(header.begin(), header.end());
-    data.insert(data.end(), fileContent.begin(), fileContent.end());
-
-    IBuffer inputBuffer = winrt::Windows::Security::Cryptography::CryptographicBuffer::CreateFromByteArray(data);
-
-    winrt::Windows::Security::Cryptography::Core::HashAlgorithmProvider sha1Provider =
-        winrt::Windows::Security::Cryptography::Core::HashAlgorithmProvider::OpenAlgorithm(L"SHA1");
-
-    IBuffer hashBuffer = sha1Provider.HashData(inputBuffer);
-
-    if (hashBuffer.Length() != sha1Provider.HashLength()) {
-        return "Hash computation failed";
-    }
-
-    winrt::com_array<uint8_t> hashData;
-    winrt::Windows::Security::Cryptography::CryptographicBuffer::CopyToByteArray(hashBuffer, hashData);
-
-    std::ostringstream hashString;
-    for (unsigned char byte : hashData) {
-        hashString << std::hex << std::setfill('0') << std::setw(2) << static_cast<int>(byte);
-    }
-
-    return hashString.str().substr(0, 7);
+std::string Latite::getBuildTimestamp() {
+#if defined(LATITE_BUILD_TIMESTAMP)
+    return LATITE_BUILD_TIMESTAMP;
+#else
+    return getCompilerTimestamp();
+#endif
 }
 
 std::wstring Latite::GetCurrentModuleFilePath(HMODULE hModule) {

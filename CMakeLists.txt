@@ -2,9 +2,11 @@
 
 project(Latite)
 
-# Allow Nightly as a valid configuration. Public builds intentionally emit
-# private PDBs so crash dumps can be symbolicated later without shipping those
-# PDBs to users.
+set(LATITE_BUILD_TIMESTAMP "" CACHE STRING "Latite build timestamp in YYYYMMDD-HHMMSS UTC format")
+if (NOT LATITE_BUILD_TIMESTAMP)
+    string(TIMESTAMP LATITE_BUILD_TIMESTAMP "%Y%m%d-%H%M%S" UTC)
+endif ()
+
 set(CMAKE_CONFIGURATION_TYPES "Debug;Release;RelWithDebInfo;MinSizeRel;Nightly" CACHE STRING "" FORCE)
 
 set(CMAKE_C_FLAGS_NIGHTLY "${CMAKE_C_FLAGS_RELWITHDEBINFO}" CACHE STRING "" FORCE)
@@ -94,6 +96,7 @@ target_compile_definitions(Latite PRIVATE
 
         $<$<CONFIG:Debug>:LATITE_DEBUG>
         $<$<CONFIG:Debug>:LATITE_CRASH_REPORTING>
+        $<$<CONFIG:Debug>:LATITE_BUILD_TIMESTAMP=\"${LATITE_BUILD_TIMESTAMP}\">
         $<$<CONFIG:Release>:LATITE_RELEASE>
         $<$<CONFIG:Release>:LATITE_CRASH_REPORTING>
         $<$<CONFIG:RelWithDebInfo>:LATITE_RELEASE>
@@ -101,6 +104,7 @@ target_compile_definitions(Latite PRIVATE
         $<$<CONFIG:MinSizeRel>:LATITE_RELEASE>
         $<$<CONFIG:Nightly>:LATITE_NIGHTLY>
         $<$<CONFIG:Nightly>:LATITE_CRASH_REPORTING>
+        $<$<CONFIG:Nightly>:LATITE_BUILD_TIMESTAMP=\"${LATITE_BUILD_TIMESTAMP}\">
 )
 
 # Compile options

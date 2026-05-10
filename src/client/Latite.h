@@ -134,8 +134,7 @@ public:
 
 	void fetchLatiteUsers();
 	std::wstring GetCurrentModuleFilePath(HMODULE hModule);
-	std::string fetchLatestGitHash();
-	std::string calcCurrentDLLHash();
+	static std::string getBuildTimestamp();
 
 	void writeServerIP();
 
