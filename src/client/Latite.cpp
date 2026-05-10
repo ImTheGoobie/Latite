@@ -1099,12 +1099,6 @@ void Latite::onRenderOverlay(Event& evG) {
         latest(ev.getDeviceContext());
         this->dxRenderQueue.pop();
     }
-
-    static auto time = std::chrono::steady_clock::now();
-    auto now = std::chrono::steady_clock::now();
-    if (std::chrono::duration_cast<std::chrono::seconds>(now - time) > 5s) {
-        Latite::writeServerIP();
-    }
 }
 
 void Latite::onPacketReceive(Event& evG) {
