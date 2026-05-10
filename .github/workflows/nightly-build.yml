@@ -41,6 +41,14 @@ jobs:
       - name: Install Ninja
         uses: seanmiddleditch/gha-setup-ninja@v3
 
+      - name: Compute build timestamp
+        id: build_timestamp
+        shell: bash
+        run: |
+          TS=$(date -u +"%Y%m%d-%H%M%S")
+          echo "TIMESTAMP=$TS" >> "$GITHUB_ENV"
+          echo "timestamp=$TS" >> "$GITHUB_OUTPUT"
+
       # Configure using Ninja + clang-cl
       - name: Configure CMake (clang-cl + Ninja)
         run: |
@@ -49,14 +57,15 @@ jobs:
           cmake -B ${{ env.BUILD_DIR }} -G Ninja `
             -DCMAKE_BUILD_TYPE=${{ env.BUILD_CONFIGURATION }} `
             -DCMAKE_C_COMPILER=clang-cl `
-            -DCMAKE_CXX_COMPILER=clang-cl
+            -DCMAKE_CXX_COMPILER=clang-cl `
+            -DLATITE_BUILD_TIMESTAMP=${{ steps.build_timestamp.outputs.timestamp }}
 
       # Build using Ninja. CMAKE_BUILD_TYPE selected the config at configure time.
       - name: Build with Ninja
         run: |
           cmake --build ${{ env.BUILD_DIR }}
 
-      # Upload PR build artifacts so DLL files are easy to download without creating a release
+      # Upload PR build artifacts so DLL/PDB files are easy to download without creating a release
       # P.S. Artifacts are retained for only 90 days.
       - name: Upload PR artifacts
         if: github.event_name == 'pull_request'
@@ -65,14 +74,24 @@ jobs:
           name: LatiteNightly-PR-${{ github.event.pull_request.number }}
           path: |
             ${{ github.workspace }}/${{ env.BUILD_DIR }}/LatiteNightly.dll
+            ${{ github.workspace }}/${{ env.BUILD_DIR }}/LatiteNightly.pdb
           if-no-files-found: error
 
-      - name: Compute build timestamp
-        if: github.event_name == 'push' && github.ref == 'refs/heads/master'
-        shell: bash
+      - name: Stage timestamped PDB artifact
+        if: github.event_name != 'pull_request'
         run: |
-          TS=$(date -u +"%Y%m%d-%H%M%S")
-          echo "TIMESTAMP=$TS" >> "$GITHUB_ENV"
+          New-Item -ItemType Directory -Force -Path "${{ runner.temp }}/pdb-artifacts" | Out-Null
+          Copy-Item `
+            "${{ github.workspace }}/${{ env.BUILD_DIR }}/LatiteNightly.pdb" `
+            "${{ runner.temp }}/pdb-artifacts/LatiteNightly-${{ steps.build_timestamp.outputs.timestamp }}.pdb"
+
+      - name: Upload timestamped PDB artifact
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: LatiteNightly-${{ steps.build_timestamp.outputs.timestamp }}.pdb
+          path: ${{ runner.temp }}/pdb-artifacts/LatiteNightly-${{ steps.build_timestamp.outputs.timestamp }}.pdb
+          if-no-files-found: error
 
       - name: Create timestamped archival release
         if: github.event_name == 'push' && github.ref == 'refs/heads/master'
