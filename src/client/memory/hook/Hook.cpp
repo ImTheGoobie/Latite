@@ -4,14 +4,20 @@
 #include "MinHook.h"
 #include "vhook/vtable_hook.h"
 
-Hook::Hook(uintptr_t target, void* detour, std::string const& hookName, bool tableSwap)
+Hook::Hook(uintptr_t targetAddress, void* detourFunc, std::string const& hookName, bool tableSwap)
+	: funcPtr(nullptr),
+	  detour(detourFunc),
 #ifdef LATITE_DEBUG
-	: funcName(hookName)
+	  funcName(hookName),
+#else
+	  funcName(""),
 #endif
+	  tableSwapHook(tableSwap),
+	  target(targetAddress)
 {
 
 	if (tableSwap) {
-		auto res = vh::hook(reinterpret_cast<LPVOID*>(target), detour, &this->funcPtr);
+		auto res = vh::hook(reinterpret_cast<LPVOID*>(targetAddress), detourFunc, &this->funcPtr);
 		if (res != 0) {
 #ifdef LATITE_DEBUG
 			Logger::Warn("Creation of hook {} failed with status {}", this->funcName, vh::status_to_string(res));
@@ -20,7 +26,7 @@ Hook::Hook(uintptr_t target, void* detour, std::string const& hookName, bool tab
 		return;
 	}
 
-	MH_STATUS res = MH_CreateHook(reinterpret_cast<LPVOID>(target), detour, &this->funcPtr);
+	MH_STATUS res = MH_CreateHook(reinterpret_cast<LPVOID>(targetAddress), detourFunc, &this->funcPtr);
 	if (res != MH_OK) {
 #ifdef LATITE_DEBUG
 		Logger::Warn("Creation of hook {} failed with status {}", this->funcName, MH_StatusToString(res));
