@@ -36,6 +36,8 @@ jobs:
       # Provides environment variables for MSVC-compatible linking
       - name: Set up MSVC Developer Environment
         uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
 
       # Install Ninja (GitHub Windows runner already has it, but we ensure fresh install)
       - name: Install Ninja
@@ -49,15 +51,17 @@ jobs:
           echo "TIMESTAMP=$TS" >> "$GITHUB_ENV"
           echo "timestamp=$TS" >> "$GITHUB_OUTPUT"
 
-      # Configure using Ninja + clang-cl
-      - name: Configure CMake (clang-cl + Ninja)
+      # Configure using Ninja + MSVC cl.exe. Keep this aligned with CMakePresets.json;
+      # packet hooks write into Minecraft-owned STL objects, so clang-cl builds can
+      # differ enough to break chat packet handling at runtime.
+      - name: Configure CMake (MSVC cl.exe + Ninja)
         run: |
-          $env:CC = "clang-cl"
-          $env:CXX = "clang-cl"
+          $env:CC = "cl.exe"
+          $env:CXX = "cl.exe"
           cmake -B ${{ env.BUILD_DIR }} -G Ninja `
             -DCMAKE_BUILD_TYPE=${{ env.BUILD_CONFIGURATION }} `
-            -DCMAKE_C_COMPILER=clang-cl `
-            -DCMAKE_CXX_COMPILER=clang-cl `
+            -DCMAKE_C_COMPILER=cl.exe `
+            -DCMAKE_CXX_COMPILER=cl.exe `
             -DLATITE_BUILD_TIMESTAMP=${{ steps.build_timestamp.outputs.timestamp }}
 
       # Build using Ninja. CMAKE_BUILD_TYPE selected the config at configure time.
