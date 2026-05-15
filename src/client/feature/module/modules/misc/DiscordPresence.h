@@ -38,8 +38,8 @@ private:
 
 	const std::chrono::seconds presenceCheckInterval = 5s;
 	const std::chrono::seconds presenceRefreshInterval = 60s;
-	const std::chrono::seconds hiveConnectionProbeInterval = 5s;
-	const std::chrono::seconds hiveUserConnectionBackoff = 10s;
-	const std::chrono::seconds hiveConnectionProbeResponseWindow = 10s;
+	const std::chrono::seconds hiveConnectionProbeInterval = 10s;
+	const std::chrono::seconds hiveUserConnectionBackoff = 20s;
+	const std::chrono::seconds hiveConnectionProbeResponseWindow = 20s;
 	const std::string discordApplicationId = "1066896173799047199";
 };
