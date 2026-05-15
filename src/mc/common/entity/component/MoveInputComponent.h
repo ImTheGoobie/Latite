@@ -3,7 +3,9 @@
 #include "MoveInputState.h"
 
 namespace SDK {
-	struct MoveInputComponent {
+	struct MoveInputComponent : IEntityComponent {
+		static constexpr uint32_t type_hash = 0x018B1887;
+
 		MoveInputState inputState;
 		MoveInputState rawInputState;
 		int8_t holdAutoJumpInWaterTicks;

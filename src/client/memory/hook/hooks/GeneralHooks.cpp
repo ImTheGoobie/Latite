@@ -10,10 +10,10 @@
 #include "client/event/events/MouseReleaseEvent.h"
 #include "client/screen/ScreenManager.h"
 #include "mc/common/client/game/GameCore.h"
-#include "mc/common/client/game/MouseInputPacket.h"
+#include "mc/common/client/game/MouseDevice.h"
 
 namespace {
-	std::shared_ptr<Hook> Level_tickHook;
+	std::shared_ptr<Hook> MultiPlayerLevel__subTickHook;
 	std::shared_ptr<Hook> ChatScreenController_sendChatMesageHook;
 	std::shared_ptr<Hook> GameRenderer_renderCurrentFrameHook;
 	//std::shared_ptr<Hook> Keyboard_feedHook;
@@ -41,18 +41,15 @@ namespace {
 	std::shared_ptr<Hook> AppPlatformGDK_releaseMouseHook;
 }
 
-void GenericHooks::Level_tick(SDK::Level* level) {
-	if (level == SDK::ClientInstance::get()->minecraft->getLevel()) {
-		// Clientside level
-		// dispatch clientside tick event..
-		TickEvent ev(level);
-		Latite::getEventing().dispatch(ev);
-		Latite::getClientMessageQueue().doPrint(100);
+void GenericHooks::MultiPlayerLevel__subTick(SDK::Level* level) {
+	TickEvent ev(level);
+	Latite::getEventing().dispatch(ev);
+	Latite::getClientMessageQueue().doPrint(100);
 
-		PluginManager::Event sEv{L"world-tick", {}, false};
-		Latite::getPluginManager().dispatchEvent(sEv);
-	}
-	Level_tickHook->oFunc<decltype(&Level_tick)>()(level);
+	PluginManager::Event sEv{L"world-tick", {}, false};
+	Latite::getPluginManager().dispatchEvent(sEv);
+
+	MultiPlayerLevel__subTickHook->oFunc<decltype(&MultiPlayerLevel__subTick)>()(level);
 }
 
 void* GenericHooks::ChatScreenController_sendChatMessage(void* controller, std::string& message) {
@@ -118,14 +115,14 @@ LRESULT GenericHooks::MainWindow__windowProcCallback(HWND hwnd, UINT msg, WPARAM
 bool GenericHooks::GameCore_handleMouseInput(void* a1, void* a2, void* a3) { // Made up name
 	const auto res = GameCore_handleMouseInputHook->oFunc<decltype(&GameCore_handleMouseInput)>()(a1, a2, a3);
 
-	static auto mouseInputVector = reinterpret_cast<std::vector<MouseInputPacket>*>(Signatures::MouseInputVector.result);
+	const auto mouse = SDK::MouseDevice::get();
 
-	for (size_t i = 0; i < mouseInputVector->size(); i++) { // This method sucks so fucking bad, but gets the job done
-		auto& start = mouseInputVector->at(i);
-		auto it = std::next(mouseInputVector->begin(), i);
+	for (size_t i = 0; i < mouse->inputs.size(); i++) { // This method sucks, but gets the job done
+		auto& start = mouse->inputs.at(i);
+		auto it = std::next(mouse->inputs.begin(), i);
 
-		const auto button = start.type;
-		const auto state = start.state;
+		const auto button = start.action;
+		const auto state = start.data;
 
 		if (button > 0) {
 			Vec2& mousePos = SDK::ClientInstance::get()->cursorPos;
@@ -157,14 +154,14 @@ bool GenericHooks::GameCore_handleMouseInput(void* a1, void* a2, void* a3) { // 
 
 			PluginManager::Event ev{L"click", values, true};
 			if (Latite::getPluginManager().dispatchEvent(ev)) {
-				mouseInputVector->erase(it);
+				mouse->inputs.erase(it);
 				continue;
 			}
 		}
 
 		ClickEvent ev{ button, static_cast<char>(state) };
 		if (Eventing::get().dispatch(ev))
-			mouseInputVector->erase(it);
+			mouse->inputs.erase(it);
 	}
 
 	return res;
@@ -420,8 +417,8 @@ GenericHooks::GenericHooks() : HookGroup("General") {
 	//LoadLibraryWHook = addHook(reinterpret_cast<uintptr_t>(&::LoadLibraryA), hkLoadLibraryW);
 
 
-	Level_tickHook = addHook(Signatures::Level_tick.result,
-		Level_tick, "Level::tick");
+	MultiPlayerLevel__subTickHook = addHook(Signatures::MultiPlayerLevel__subTick.result,
+		MultiPlayerLevel__subTick, "Level::tick");
 
 	ChatScreenController_sendChatMesageHook = addHook(Signatures::ChatScreenController_sendChatMessage.result,
 		ChatScreenController_sendChatMessage, "ChatScreenController::sendChatMessage");

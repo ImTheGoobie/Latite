@@ -20,6 +20,7 @@
 #include <chrono>
 #include <format>
 #include <array>
+#include <bitset>
 
 using namespace std::chrono_literals;
 
@@ -32,6 +33,8 @@ using namespace mnem::sig_literals;
 using nlohmann::json;
 
 #include <libhat.hpp>
+
+#include <entt/entt.hpp>
 
 // COM
 #include <d2d1.h>

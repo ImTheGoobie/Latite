@@ -8,7 +8,7 @@ namespace SDK {
 	class BaseAttributeMap {
 		std::vector<uint32_t> ids;
 		std::vector<AttributeInstance> instances;
-		char pad[0x28];
+		char pad[0x20];
 
 		struct AttributeResult { // Made up
 			std::vector<uint32_t>::iterator id;
@@ -18,18 +18,21 @@ namespace SDK {
 	public:
 
 		AttributeInstance* getInstance(unsigned int id) {
-			using func_t = void(*)(AttributeResult&, BaseAttributeMap*, const uint32_t&);
-			static auto func = reinterpret_cast<func_t>(Signatures::BaseAttributeMap_getInstance.result);
-			AttributeResult res{};
-			func(res, this, id);
-			if (res.id == this->ids.end() || res.instance == this->instances.end())
+			if (this->ids.size() != this->instances.size())
 				return nullptr;
-			return &*res.instance;
+
+			for (size_t i = 0; i < this->ids.size(); i++) {
+				if (this->ids[i] == id)
+					return &this->instances[i];
+			}
+
+			return nullptr;
 		}
 	};
 	
-	class AttributesComponent {
-	public:
+	struct AttributesComponent : IEntityComponent {
+		static constexpr uint32_t type_hash = 0xFD3B0613;
+
 		BaseAttributeMap baseAttributes{};
 	};
 }

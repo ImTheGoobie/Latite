@@ -290,9 +290,9 @@ d2d::Rect MCDrawUtil::drawItem(SDK::ItemStack* item, Vec2 const& pos, float size
 	
 	auto it = item->getItem();
 
-	ctx.itemRenderer->renderGuiItemNew(&ctx, item, 0, pos.x * guiScale, pos.y * guiScale, opacity, (sizeModifier * guiScale) * 3.f, 0.f, false);
+	ctx.itemRenderer->renderGuiItemNew(&ctx, item, 0, pos.x * guiScale, pos.y * guiScale, opacity, (sizeModifier * guiScale) * 3.f, 1.f, false);
 	if (it && it->isGlint(item)) {
-		ctx.itemRenderer->renderGuiItemNew(&ctx, item, 0, pos.x * guiScale, pos.y * guiScale, opacity, (sizeModifier * guiScale) * 3.f, 0.f, true);
+		ctx.itemRenderer->renderGuiItemNew(&ctx, item, 0, pos.x * guiScale, pos.y * guiScale, opacity, (sizeModifier * guiScale) * 3.f, 1.f, true);
 	}
 
 	constexpr float itemSize = 16.f;

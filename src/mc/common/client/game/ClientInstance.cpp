@@ -1,19 +1,19 @@
 #include "pch.h"
 #include "ClientInstance.h"
 
-#include "util/Util.h"
+#include "Platform_GameCore.h"
 
 SDK::ClientInstance* SDK::ClientInstance::instance = nullptr;
 
 SDK::ClientInstance* SDK::ClientInstance::get() {
     if (!instance) {
         // IMinecraftGame
-        MinecraftGame** mcgame = reinterpret_cast<MinecraftGame**>(Signatures::Misc::minecraftGamePointer.result);
-        if (!*mcgame) {
+        const auto mcgame = Platform_GameCore::get()->getMinecraftGame();
+        if (!mcgame) {
             return nullptr;
         }
 
-        instance = (*mcgame)->getPrimaryClientInstance();
+        instance = mcgame->getPrimaryClientInstance();
     }
     return instance;
 }
@@ -32,12 +32,8 @@ SDK::GuiData* SDK::ClientInstance::getGuiData() {
 }
 
 SDK::Options* SDK::ClientInstance::getOptions() {
-    return memory::callVirtual<Options*>(this, 0xB1);
+    return hat::member_at<Options*>(this, 0xC38);
 }
-
-/*SDK::ClientHMDState* SDK::ClientInstance::getClientHMDState() {
-    return memory::callVirtual<ClientHMDState*>(this, 0x197);
-}*/
 
 void SDK::ClientInstance::grabCursor() {
     reinterpret_cast<void(__fastcall*)(void*)>(Signatures::ClientInstance_grabCursor.result)(this);

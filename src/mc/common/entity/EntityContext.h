@@ -1,43 +1,53 @@
 #pragma once
-#include <cstdint>
-#include <bitset>
-#include "util/LMath.h"
 
-namespace SDK {
-	class EntityContext {
-	public:
-		uintptr_t getBasicRegistry() {
-			return basicRegistry;
-		}
+#include "EntityIdTraits.h"
+#include "IEntityComponent.h"
 
-		uint32_t& getId() {
-			return id;
-		}
-	private:
-		void* entityRegistry;
-		uintptr_t basicRegistry;
-		uint32_t id;
-	};
+template<>
+struct entt::entt_traits<EntityId> : entt::basic_entt_traits<EntityIdTraits> {
+    static constexpr std::size_t page_size = 2048;
+};
 
-	struct AABBShapeComponent
-	{
-	public:
-		AABB boundingBox;
-		Vec2 size;
-	}; //Size: 0x0020
+template<std::derived_from<IEntityComponent> Type>
+struct entt::component_traits<Type, EntityId> {
+    using element_type = Type;
+    using entity_type = EntityId;
+    static constexpr bool in_place_delete = true;
+    static constexpr std::size_t page_size = 128 * !std::is_empty_v<Type>;
+};
 
-	class StateVectorComponent
-	{
-	public:
-		Vec3 pos; //0x0000
-		Vec3 posOld; //0x000C
-		Vec3 velocity; //0x0018
-	}; //Size: 0x0024
+template<typename Type>
+struct entt::storage_type<Type, EntityId> {
+    using type = basic_storage<Type, EntityId>;
+};
 
-	class ActorRotationComponent
-	{
-	public:
-		Vec2 rotation; //0x0000
-		Vec2 rotationOld; //0x0008
-	}; //Size: 0x0010
-}
+template<std::derived_from<IEntityComponent> Type>
+struct entt::type_hash<Type> {
+    [[nodiscard]] static consteval id_type value() noexcept {
+        constexpr auto hash = Type::type_hash; // Pre-define hash to avoid compiler shenanigans
+        return hash;
+    }
+
+    [[nodiscard]] consteval operator id_type() const noexcept {
+        return value();
+    }
+};
+
+class EntityRegistry : public std::enable_shared_from_this<EntityRegistry> {
+public:
+	std::string name;
+	entt::basic_registry<EntityId> ownedRegistry;
+	uint32_t id;
+
+    template<typename T>
+    T* tryGetGlobalComponent() {
+        return this->ownedRegistry.ctx().find<T>();
+    }
+};
+
+class EntityContext {
+public:
+	EntityRegistry& registry;
+	entt::basic_registry<EntityId>& enttRegistry;
+	EntityId entity;
+};
