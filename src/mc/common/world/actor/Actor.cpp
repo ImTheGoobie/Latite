@@ -10,7 +10,7 @@
 #include "mc/common/entity/component/RuntimeIDComponent.h"
 
 SDK::ActorDataFlagComponent* SDK::Actor::getActorDataFlagsComponent() {
-	return reinterpret_cast<SDK::ActorDataFlagComponent * (__fastcall*)(uintptr_t a1, uint32_t * a2)>(Signatures::Components::actorDataFlagsComponent.result)(entityContext.getBasicRegistry(), &entityContext.getId());
+	return this->tryGetComponent<ActorDataFlagComponent>();
 }
 
 bool SDK::Actor::getStatusFlag(int flag) {
@@ -58,12 +58,12 @@ void SDK::Actor::setNameTag(std::string* nametag) {
 	return reinterpret_cast<void(__fastcall*)(Actor*, std::string*)>(Signatures::Actor_setNameTag.result)(this, nametag);
 }
 
-int64_t SDK::Actor::getRuntimeID() {
-	return *reinterpret_cast<int64_t * (__fastcall*)(uintptr_t a1, uint32_t * a2)>(Signatures::Components::runtimeIDComponent.result)(entityContext.getBasicRegistry(), &entityContext.getId());
+uint64_t SDK::Actor::getRuntimeID() {
+	return this->tryGetComponent<RuntimeIDComponent>()->runtimeID;
 }
 
-uint8_t SDK::Actor::getEntityTypeID() {
-	return *reinterpret_cast<uint32_t * (__fastcall*)(uintptr_t a1, uint32_t * a2)>(Signatures::Components::actorTypeComponent.result)(entityContext.getBasicRegistry(), &entityContext.getId());
+uint32_t SDK::Actor::getEntityTypeID() {
+	return this->tryGetComponent<ActorTypeComponent>()->type;
 }
 
 void SDK::Actor::swing() {
@@ -76,7 +76,7 @@ bool SDK::Actor::isPlayer() {
 }
 
 SDK::AttributesComponent* SDK::Actor::getAttributesComponent() {
-	return reinterpret_cast<SDK::AttributesComponent * (__fastcall*)(const EntityContext&)>(Signatures::Components::attributesComponent.result)(entityContext);
+	return this->tryGetComponent<AttributesComponent>();
 }
 
 SDK::AttributeInstance* SDK::Actor::getAttribute(SDK::Attribute& attribute) {
@@ -110,10 +110,5 @@ bool SDK::Actor::isInvisible() {
 }
 
 SDK::ItemStack* SDK::Actor::getArmor(int armorSlot) {
-	// TODO: this is EXTREMELY scuffed
-	int& componentId = hat::member_at<int>(this, 0x18);
-	auto obj = reinterpret_cast<void* (*)(void* obj, int& id)>(Signatures::Components::actorEquipmentPersistentComponent.result)
-		(hat::member_at<void*>(this, 0x10), componentId);
-
-	return (*(SDK::ItemStack*(**)(LPVOID, int))(**(uintptr_t**)((uintptr_t)obj + 8) + 56i64))(*(LPVOID*)((uintptr_t)obj + 8), armorSlot);
+	return this->tryGetComponent<ActorEquipmentComponent>()->armorContainer->getItem(armorSlot);
 }

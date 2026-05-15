@@ -1,7 +1,7 @@
 #include "ThirdPersonNametag.h"
 #include <mc/Addresses.h>
 
-static constexpr size_t instructionSize = 6;
+static constexpr size_t instructionSize = 2;
 static char originalBytes[instructionSize] = {};
 static void* instructionPointer = nullptr;
 

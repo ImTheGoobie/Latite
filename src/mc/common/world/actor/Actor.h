@@ -4,7 +4,10 @@
 #include "mc/common/util/MolangVariableMap.h"
 #include <memory>
 
+#include "mc/common/entity/component/AABBShapeComponent.h"
 #include "mc/common/entity/component/ActorDataFlagComponent.h"
+#include "mc/common/entity/component/ActorRotationComponent.h"
+#include "mc/common/entity/component/StateVectorComponent.h"
 
 namespace SDK {
 	class Actor {
@@ -35,17 +38,22 @@ namespace SDK {
 
 		int getCommandPermissionLevel();
 		void setNameTag(std::string* nametag);
-		int64_t getRuntimeID();
-		uint8_t getEntityTypeID();
+		uint64_t getRuntimeID();
+		uint32_t getEntityTypeID();
 		void swing();
 		bool isPlayer();
 
-		class AttributesComponent* getAttributesComponent();
+		struct AttributesComponent* getAttributesComponent();
 		class AttributeInstance* getAttribute(class Attribute& attribute);
 		float getHealth();
 		float getHunger();
 		float getSaturation();
 		bool isInvisible();
 		class ItemStack* getArmor(int armorSlot);
+
+		template<typename T>
+		T* tryGetComponent() {
+			return entityContext.enttRegistry.try_get<T>(entityContext.entity);
+		}
 	};
 }

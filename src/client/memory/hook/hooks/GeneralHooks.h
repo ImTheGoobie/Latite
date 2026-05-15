@@ -5,7 +5,7 @@
 #include <mc/common/client/renderer/game/CameraComponent.h>
 
 class GenericHooks : public HookGroup {
-    static void __fastcall Level_tick(SDK::Level* level);
+    static void __fastcall MultiPlayerLevel__subTick(SDK::Level* level);
     static void* __fastcall ChatScreenController_sendChatMessage(void* controller, std::string& message);
     static void* __fastcall GameRenderer_renderCurrentFrame(void* rend);
     static LRESULT __fastcall MainWindow__windowProcCallback(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
