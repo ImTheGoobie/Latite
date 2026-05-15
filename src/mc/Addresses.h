@@ -59,7 +59,7 @@ public:
 		"Options::getPerspective"};
 
 	inline static SigImpl Options_getHideHand{[](memory::signature_store&, uintptr_t res) { return res; },
-		"56 48 83 EC ? 48 89 CE 48 8B 05 ? ? ? ? 48 31 E0 48 89 44 24 ? 48 8B 01 48 8B 40 ? 48 8D 54 24 ? 41 B8 A9 01 00 00"_sig, // Will probably die every update from now on, but a good sig would be thousands of bytes long
+		"48 83 EC 38 48 8B 05 ? ? ? ? 48 31 E0 48 89 44 24 ? 48 8B 01 48 8B 40 08 48 8D 54 24 ? 41 B8 AA 01 00 00"_sig, // Will probably die every update from now on, but a good sig would be thousands of bytes long
 		"Options::getHideHand"};
 
 	inline static SigImpl ClientInstance_grabCursor{[](memory::signature_store&, uintptr_t res) { return res; },
