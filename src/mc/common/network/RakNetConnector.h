@@ -16,7 +16,7 @@ namespace SDK {
 		CLASS_FIELD(std::string, ipAddress, 0x400);
 		CLASS_FIELD(std::string, dns, 0x420);
 		CLASS_FIELD(uint16_t, port, 0x464);
-		CLASS_FIELD(std::string, featuredServer, 0x500);
+		CLASS_FIELD(std::string, featuredServer, 0x508);
 
 		class RakPeer* getPeer() {
 			return memory::callVirtual<RakPeer*>(this, 0x19);
