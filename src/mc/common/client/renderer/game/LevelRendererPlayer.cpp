@@ -4,7 +4,7 @@
 #include "util/LMath.h"
 
 Vec3& SDK::LevelRendererPlayer::getOrigin() {
-    return hat::member_at<Vec3>(this, Signatures::Offset::LevelRendererPlayer_origin.result);
+    return hat::member_at<Vec3>(this, 0x710);
 }
 
 float& SDK::LevelRendererPlayer::getFovX() {

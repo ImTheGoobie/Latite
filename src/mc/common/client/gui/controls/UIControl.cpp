@@ -5,5 +5,5 @@
 
 void SDK::UIControl::updatePos() {
 	flags |= 1;
-	reinterpret_cast<void(*)(UIControl*)>(Signatures::UIControl_getPosition.result)(this);
+	reinterpret_cast<void(*)(UIControl*)>(Signatures::UIControl_updateCachedPosition.result)(this);
 }
