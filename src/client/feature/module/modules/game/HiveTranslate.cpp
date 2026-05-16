@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "util/Util.h"
+#include "util/Logger.h"
 #include "HiveTranslate.h"
 #include "client/Latite.h"
 
@@ -37,7 +38,7 @@ void HiveTranslate::onText(Event& evG) {
     static const std::regex pattern("\u00c2\u00a77\u00c2\u00a7l\u00c2\u00bb \u00c2\u00a7r");
     
     std::smatch match;
-	if (!std::regex_search(message, match, pattern)) return;
+	if (!std::regex_search(message, match, pattern) && match.position() == 0) return;
 
 	std::string query = urlEncode(message.substr(match.position() + match.length()));
 	std::string url = "https://clients5.google.com/translate_a/t?client=dict-chrome-ex&sl=auto&tl=" + targetLang + "&q=" + query;
@@ -70,9 +71,21 @@ void HiveTranslate::onText(Event& evG) {
 				Latite::get().getClientMessageQueue().push(formattedMsg);
 				
 			}
-			catch (nlohmann::json::exception const&) {}
-			catch (winrt::hresult_error const&) {}
+			catch (nlohmann::json::exception const& err) {
+				std::string msg = "HiveTranslate: HTTP request failed: " + std::string(err.what());
+				Logger::Warn(msg);
+				Latite::getClientMessageQueue().push(msg);
+			}
+			catch (winrt::hresult_error const& err) {
+				std::string msg = "HiveTranslate: HTTP request failed: " + winrt::to_string(err.message());
+				Logger::Warn(msg);
+				Latite::getClientMessageQueue().push(msg);
+			}
 		});
 		
-	} catch (winrt::hresult_error const&) {}
+	} catch (winrt::hresult_error const& err) {
+		std::string msg = "HiveTranslate: HTTP request failed: " + winrt::to_string(err.message());
+		Logger::Warn(msg);
+		Latite::getClientMessageQueue().push(msg);
+	}
 }
